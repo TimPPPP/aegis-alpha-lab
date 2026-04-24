@@ -1,0 +1,29 @@
+# Trading cost, market impact, and borrow model — spec §9.
+#   TC_{i,t} = s_{i,t}·|Δw_{i,t}| + η·(|Δw_{i,t}|·GMV/ADV_{i,t})^{3/2} + b_{i,t}·max(-w_{i,t},0)·Δt
+
+spread:
+  method: "corwin_schultz"
+  half_spread_floor_bp:
+    large_cap: 2.0       # top 2 deciles
+    mid_cap:   5.0
+
+impact:
+  model: "almgren"
+  eta: 0.10
+  exponent: 1.5          # 3/2
+
+borrow:
+  tiers_bp_per_year:     # by market-cap decile
+    top_2: 25
+    mid_6: 150
+    bottom_2: 500
+
+# Reconcile with Huang & Fan (2026) by also reporting results under a flat
+# one-way cost convention, so V1 outcomes can be compared apples-to-apples
+# against their 2.75 gross / 2.21 net Sharpe benchmark.
+comparison_convention:
+  flat_bp_one_way: 3.0
+
+capacity:
+  gmv_pct_of_adv_max: 0.05   # |w_i| ≤ 5% · ADV_i / GMV
+  position_pct_max: 0.02

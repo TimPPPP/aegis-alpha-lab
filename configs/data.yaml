@@ -1,0 +1,24 @@
+# Data layout + current working slice.
+#
+# Distinction from configs/universe.yaml:
+#   universe.yaml.date_range   → full V1 sample (2000-2025). Authoritative.
+#   data.yaml.date_range       → current working slice for iteration.
+#                                Narrower during Weeks 1-4; equals universe range
+#                                once the pipeline is stable.
+# Narrowing here does NOT re-open the locked sub-holdout (§5.2).
+
+paths:
+  raw:       ./data/raw          # immutable WRDS pulls
+  interim:   ./data/interim      # post-adjustment, pre-panel
+  processed: ./data/processed    # final Parquet panel + factor outputs
+
+date_range:                      # Week 1 slice — fits Polygon free-tier 2-year window
+  start: "2024-06-01"            # ~22 mo back from 2026-04-23 (inside free tier)
+  end:   "2026-03-31"            # 252-day lookback → eligibility starts ~2025-06
+
+id_column: ticker                # Polygon primary key (CRSP permno deprecated 2026-04-23)
+calendar:  "NYSE"                # trading-day calendar
+
+snapshot:
+  panel_filename:  "daily_panel_week1.parquet"
+  factor_filename: "factor_mom_12_1_week1.parquet"

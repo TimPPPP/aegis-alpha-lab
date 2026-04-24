@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+
+# Virtual envs
+.venv/
+venv/
+env/
+.env
+.envrc
+
+# uv
+# uv.lock IS tracked (reproducibility). Python venv is not.
+
+# Data artifacts — never commit. WRDS terms + disk size both forbid it.
+data/
+*.parquet
+*.arrow
+*.feather
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db
+
+# Notebook outputs — stripped by pre-commit (nbstripout), but belt-and-braces:
+notebooks/*.ipynb_checkpoints/
+.ipynb_checkpoints/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+.claude/
+
+# Local data blobs (Qlib A-shares archive, etc.) — not part of V1
+qlib_bin.tar.gz
+*.tar.gz
+
+# Build
+build/
+dist/
+site/
+
+# Open-office lock files
+~$*

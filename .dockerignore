@@ -1,0 +1,32 @@
+.git
+.github
+.venv
+.vscode
+.idea
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.hypothesis
+__pycache__
+*.pyc
+
+# Data must never be baked into the image
+data/
+*.parquet
+*.duckdb
+*.sqlite*
+
+# Docs/notebooks aren't needed at runtime
+docs/
+notebooks/
+*.docx
+*.pdf
+
+# Local env
+.env
+.envrc
+
+# OS
+.DS_Store
+Thumbs.db
+~$*

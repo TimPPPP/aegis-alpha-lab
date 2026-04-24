@@ -1,0 +1,18 @@
+# Universe filters — spec §7, following Huang & Fan (2026, Exhibit 3).
+
+exchanges: ["NYSE", "AMEX", "NASDAQ"]
+share_classes: ["common"]      # CRSP share codes 10, 11
+
+price_floor_usd: 5.0            # applied on t-1 close
+min_history_days: 252
+
+# Target cross-section ≈ 3,000 stocks after filters (spec §15.1).
+target_cross_section: 3000
+
+forward_return:
+  winsorize_percentiles: [0.01, 0.99]
+  kind: "arithmetic"
+
+date_range:
+  start: "2000-01-01"
+  end:   "2025-12-31"

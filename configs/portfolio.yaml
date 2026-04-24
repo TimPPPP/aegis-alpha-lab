@@ -1,0 +1,27 @@
+# Long-short portfolio construction — spec §10.
+
+objective:
+  # max_w  w'α − (λ/2) w'Σw − κ ||w − w_{t-1}||_1 − Σ_i TC_i(w, w_{t-1})
+  ex_ante_vol_target_annualized: 0.08  # λ tuned so unconstrained solution hits 8% vol
+  turnover_penalty_kappa: "auto"       # tuned so realized turnover ≈ 5× GMV/yr
+
+constraints:
+  dollar_neutral: true                 # 1' w = 0
+  beta_neutral_to_crsp_vw: true        # β_mkt' w = 0
+  gross_leverage: 1.0                  # ||w||_1 = 1
+
+  position_cap_abs: 0.02               # |w_i| ≤ 2%
+  position_cap_adv_pct: 0.05           # |w_i| ≤ 5% · ADV_i / GMV
+
+  style_exposure_budget_sigma: 0.25    # per style, all 9
+  industry_exposure_budget_sigma: 0.50 # per industry
+
+solver:
+  backend: "osqp"                      # ECOS fallback
+  max_iter: 20000
+  eps_abs: 1.0e-7
+  eps_rel: 1.0e-7
+  polish: true
+
+attribution:
+  residual_bp_per_day_max: 1.0         # §6 Module F acceptance

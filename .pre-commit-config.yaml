@@ -1,0 +1,37 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Run mypy through the uv-managed venv so it sees the same pandas/numpy/typer/
+  # sqlalchemy stubs as `uv run mypy src`. The pre-commit-isolated mypy env would
+  # otherwise need the full dep list duplicated here.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (uv run, scoped to src/aegis)
+        entry: uv run mypy src/aegis
+        language: system
+        pass_filenames: false
+        types: [python]
+
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout

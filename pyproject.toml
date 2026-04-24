@@ -1,0 +1,188 @@
+[project]
+name = "aegis-alpha-lab"
+version = "0.1.0"
+description = "A mathematically specified, Barra-aware, long-short U.S. equity research platform."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "Tim Peng" }]
+keywords = ["quant", "factor-investing", "barra", "long-short", "equity"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    # Numerics
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=15",
+    "scipy>=1.12",
+    "statsmodels>=0.14",
+    "scikit-learn>=1.4",
+    "lightgbm>=4.3",
+    # Storage
+    "duckdb>=0.10",
+    "sqlalchemy>=2.0",
+    # Portfolio optimization
+    "osqp>=0.6.7",
+    "cvxpy>=1.5",
+    # Config / CLI / logging
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "structlog>=24.1",
+    # Polygon.io data access (replaces WRDS after Rice denial 2026-04-23)
+    "polygon-api-client>=1.14",
+]
+
+[project.optional-dependencies]
+notebook = [
+    "ipykernel>=6.29",
+    "jupyterlab>=4.1",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+]
+
+[project.scripts]
+aegis = "aegis.cli:app"
+
+[project.urls]
+Repository = "https://github.com/timidpaper/aegis-alpha-lab"
+
+# ---------------------------------------------------------------------------
+# uv / PEP 735 dependency groups
+# ---------------------------------------------------------------------------
+[dependency-groups]
+dev = [
+    "pytest>=8.1",
+    "pytest-cov>=5.0",
+    "pytest-xdist>=3.5",
+    "hypothesis>=6.100",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "nbstripout>=0.7",
+    "types-PyYAML>=6.0",
+    "pandas-stubs>=2.2",
+]
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aegis"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["notebooks", "docs"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pyflakes + pycodestyle
+    "I",             # isort
+    "N",             # pep8-naming
+    "UP",            # pyupgrade
+    "B",             # bugbear
+    "SIM",           # simplify
+    "RUF",           # ruff-specific
+    "PL",            # pylint
+    "NPY",           # numpy rules
+    "PD",            # pandas-vet
+]
+ignore = [
+    "PLR0913",  # too many args — quant code has wide signatures
+    "PLR2004",  # magic values — spec thresholds are literal by design
+    "E501",     # line length handled by formatter
+    # Spec notation uses Greek letters and math symbols (σ, ρ, ×, ², ≥) intentionally.
+    # Ambiguous-Unicode rules would force us to rewrite "σ-algebra" as "s-algebra".
+    "RUF001",   # ambiguous-unicode-character-string
+    "RUF002",   # ambiguous-unicode-character-docstring
+    "RUF003",   # ambiguous-unicode-character-comment
+    "PD901",    # `df` is the idiomatic DataFrame variable name in pandas-vet-heavy code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S101"]
+"scripts/**" = ["T201"]  # allow print()
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/aegis"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_reexport = true
+
+[[tool.mypy.overrides]]
+module = [
+    "polygon.*",
+    "osqp.*",
+    "cvxpy.*",
+    "statsmodels.*",
+    "lightgbm.*",
+    "duckdb.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config -ra"
+markers = [
+    "polygon: tests that require a live Polygon.io API key (skipped in CI)",
+    "slow: tests that take more than a few seconds",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:pkg_resources.*",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["src/aegis"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

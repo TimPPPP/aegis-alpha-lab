@@ -1,0 +1,39 @@
+# Barra-lite cross-sectional risk model — spec §4.2–4.3.
+
+estimation:
+  method: "wls"
+  weights: "sqrt_mcap"
+  winsorize_sigma: 3.0
+  standardize: "cross_sectional_zscore"
+
+styles:                  # 9 canonical Barra-lite styles
+  - size                 # log mcap
+  - value                # composite B/P, E/P, S/P, CF/P
+  - momentum             # 12-1 log return
+  - quality              # gross profitability (Novy-Marx)
+  - low_vol              # trailing 252d realized vol (negated)
+  - liquidity            # Amihud illiquidity (negated)
+  - growth               # sales growth YoY
+  - investment           # asset growth YoY (negated)
+  - short_term_reversal  # 1-month reversal
+
+industries:              # 24 GICS industry groups (GICS level 3)
+  source: "gics_industry_group"
+  count: 24
+
+country:
+  include: true           # single-country (U.S.) intercept
+
+covariance:              # §4.3
+  factor:
+    kind: "ewma"
+    halflife_days: 90
+    # V2: switch to Ledoit–Wolf shrinkage
+    v2_shrinkage: "ledoit_wolf"
+  specific:
+    kind: "ewma"
+    halflife_days: 60
+
+acceptance:              # §6 Module D
+  mean_style_r2_min: 0.25
+  residual_lag1_acf_max: 0.05

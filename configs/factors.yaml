@@ -1,0 +1,21 @@
+# V1 Feature Catalog — spec §8. Filled out during Module C weeks (spec §12 week 9–12).
+#
+# Schema (one entry per factor):
+#
+#   - name: momentum_12m1m
+#     family: momentum          # value|momentum|quality|volatility|liquidity|...
+#     description: "Jegadeesh & Titman (1993) 12-month return skipping last month."
+#     formula: "log(P[t-21] / P[t-252])"
+#     inputs: [adj_close]
+#     operators: [lag, log, ratio]
+#     lookback_days: 252
+#     neutralize: [style, industry]   # §4.4
+#     winsorize_sigma: 3.0
+#     horizon_days: 21
+#     reference_ic: 0.04              # for §6 Module C acceptance test
+#
+# Every factor must satisfy the §4.1 measurability constraint (f_{i,t} ∈ F_t):
+# only lags, rolling moments, cross-sectional ranks, winsorize, and z-score
+# are permitted.
+
+factors: []  # populated during Module C implementation

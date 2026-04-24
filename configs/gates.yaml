@@ -1,0 +1,28 @@
+# Promotion gate thresholds — Aegis Alpha Lab V1 (spec §4.6–4.11, §5.1, §11).
+# Fixed before the 2024–2025 sub-holdout is opened. Not to be relaxed afterward.
+
+promotion:
+  t_ic_min: 3.0          # Harvey–Liu |t| > 3.0 hurdle (§4.6)
+  fdr_q: 0.10            # Benjamini–Hochberg FDR (§4.7)
+  dsr_min: 0.95          # Deflated Sharpe (§4.8)
+  ff6_t_min: 2.5         # FF6 α HAC t-stat (§4.9)
+
+retirement:
+  t_ic_max: 1.5
+  dsr_max: 0.50
+
+decay_gate:              # §4.11
+  horizons_days: [1, 2, 3, 5, 7]
+  retire_if_h1_above_and_h3_below: { h1_t_min: 3.0, h3_t_max: 1.5 }
+  retire_if_sign_flip: { h_from: 1, h_to: 5 }
+
+cv:                      # §4.10
+  forward_label_days: 21
+  embargo_days: 5
+  scheme: "purged_walk_forward_expanding"
+  fold_length_days: 252
+
+holdout:                 # §5.2
+  in_sample:  { start: "2000-01-01", end: "2022-12-31" }
+  out_of_sample: { start: "2023-01-01", end: "2025-12-31" }
+  locked_sub_holdout: { start: "2024-01-01", end: "2025-12-31" }

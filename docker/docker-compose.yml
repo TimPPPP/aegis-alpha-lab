@@ -1,0 +1,39 @@
+services:
+  aegis:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: aegis:${GIT_SHA:-dev}
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    working_dir: /app
+    command: ["--help"]
+
+  # Optional: `docker compose --profile notebook up jupyter`
+  jupyter:
+    profiles: ["notebook"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: aegis:${GIT_SHA:-dev}
+    env_file:
+      - ../.env
+    ports:
+      - "8888:8888"
+    volumes:
+      - ../data:/app/data
+      - ../notebooks:/app/notebooks
+    entrypoint: ["jupyter"]
+    command:
+      - "lab"
+      - "--ip=0.0.0.0"
+      - "--port=8888"
+      - "--no-browser"
+      - "--allow-root"
+      - "--ServerApp.token="
