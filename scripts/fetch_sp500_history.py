@@ -1,0 +1,322 @@
+"""One-shot Wikipedia scraper for historical S&P 500 membership.
+
+Produces two artifacts under ``data/reference/`` (relative to the repo root):
+
+- ``sp500_membership.csv`` — long-format, one row per ``(ticker, date_added,
+  date_removed)`` membership interval. Multi-interval tickers (added →
+  removed → re-added) get one row per closed interval plus one open-ended
+  row for current membership.
+
+- ``sp500_membership.meta.json`` — provenance sidecar (Principle 5 —
+  auditability). Records source URL, UTC fetch timestamp, scraper git SHA,
+  CSV sha256, and row counts. The meta JSON is the audit receipt for one
+  scrape; ``csv_sha256`` lets downstream code verify the CSV hasn't been
+  edited out-of-band.
+
+Run quarterly (or whenever Wikipedia's "Selected changes" table grows):
+
+    uv run python scripts/fetch_sp500_history.py
+
+Coverage notes
+--------------
+
+Wikipedia's "Selected changes" table goes back to ~2009 reliably (a
+handful of older rows exist but are sparse). Tickers that appear ONLY as
+"Removed" (i.e. pre-2009 members removed in the changes era) are encoded
+with ``date_added`` set to the earliest change-table date as a sentinel.
+This means pre-2009 backtests treat then-current members as if added at
+that sentinel date — best-effort, documented in the meta sidecar's
+``notes`` field.
+
+Same-day adds in changes that match the current-table ``Date added`` (e.g.
+TSLA 2020-12-21) are deduped: one open-ended interval, not two.
+
+Same-day rename pairs (FB Removed / META Added on 2022-06-09) are not
+collapsed at this layer; ``ticker_aliases.csv`` (Day 9) is the right place
+for rename reconciliation. Day 10's Module A acceptance test tolerates a
+1-name drift, which absorbs the few cases this leaves.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import urllib.request
+from datetime import UTC, datetime
+from io import StringIO
+from pathlib import Path
+
+import pandas as pd
+
+# Project root resolves up from scripts/<this file>; the import below expects
+# `src/` to be on sys.path when invoked via `uv run`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from aegis.utils.git import current_git_sha
+from aegis.utils.hashing import sha256_file
+
+WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+USER_AGENT = "aegis-alpha-lab/0.1 (https://github.com/timidpaper/aegis-alpha-lab)"
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_DIR = REPO_ROOT / "data" / "reference"
+CSV_PATH = OUTPUT_DIR / "sp500_membership.csv"
+META_PATH = OUTPUT_DIR / "sp500_membership.meta.json"
+
+
+def _fetch_wikipedia(url: str) -> str:
+    """Fetch Wikipedia HTML using a polite User-Agent (default urllib UA is 403'd)."""
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read()
+    return raw.decode("utf-8")
+
+
+def _normalize_current(current: pd.DataFrame) -> pd.DataFrame:
+    """Return ``(ticker, name, wiki_sector, wiki_sub_industry, date_added, cik_code)``."""
+    df = current.rename(
+        columns={
+            "Symbol": "ticker",
+            "Security": "name",
+            "GICS Sector": "wiki_sector",
+            "GICS Sub-Industry": "wiki_sub_industry",
+            "Date added": "date_added",
+            "CIK": "cik_code",
+        }
+    )
+    df["date_added"] = pd.to_datetime(df["date_added"], errors="coerce")
+    df["cik_code"] = pd.to_numeric(df["cik_code"], errors="coerce").astype("Int64")
+    df = df[["ticker", "name", "wiki_sector", "wiki_sub_industry", "date_added", "cik_code"]]
+    null_dates = int(df["date_added"].isna().sum())
+    if null_dates:
+        print(f"WARN: dropping {null_dates} current rows with unparseable date_added")
+        df = df.dropna(subset=["date_added"])
+    df["ticker"] = df["ticker"].astype(str).str.strip()
+    return df.reset_index(drop=True)
+
+
+def _normalize_changes(changes: pd.DataFrame) -> pd.DataFrame:
+    """Flatten the multi-level header and parse the effective date."""
+    flat_cols: list[str] = []
+    for col in changes.columns:
+        if isinstance(col, tuple):
+            flat_cols.append("_".join(str(c) for c in col).strip("_"))
+        else:
+            flat_cols.append(str(col))
+    df = changes.copy()
+    df.columns = flat_cols
+    df = df.rename(
+        columns={
+            "Effective Date_Effective Date": "date",
+            "Added_Ticker": "added_ticker",
+            "Added_Security": "added_name",
+            "Removed_Ticker": "removed_ticker",
+            "Removed_Security": "removed_name",
+        }
+    )
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"]).reset_index(drop=True)
+    for col in ("added_ticker", "removed_ticker", "added_name", "removed_name"):
+        if col in df.columns:
+            df[col] = df[col].astype(str).where(df[col].notna(), other=pd.NA).str.strip()
+    return df
+
+
+def _intervals_for_ticker(
+    ticker: str,
+    sorted_events: list[tuple[pd.Timestamp, str]],
+    cur_date_added: pd.Timestamp | None,
+    sentinel: pd.Timestamp,
+) -> tuple[list[dict[str, object]], bool]:
+    """Walk one ticker's events and return (rows, was_phantom_dropped)."""
+    rows: list[dict[str, object]] = []
+    open_add: pd.Timestamp | None = None
+    for ts, kind in sorted_events:
+        if kind == "add":
+            if open_add is not None:
+                # Two adds in a row without a remove — defensive close.
+                rows.append({"ticker": ticker, "date_added": open_add, "date_removed": ts})
+            open_add = ts
+        else:  # remove
+            if open_add is None:
+                open_add = sentinel
+            rows.append({"ticker": ticker, "date_added": open_add, "date_removed": ts})
+            open_add = None
+
+    is_current = cur_date_added is not None
+    if is_current:
+        # Same-day dedupe: if the dangling add matches the current row's
+        # date_added, one open-ended row covers it. Otherwise prefer the
+        # current table's date (the changes table sometimes records the
+        # announcement date rather than the effective date).
+        if open_add is not None and open_add == cur_date_added:
+            date_added_final = open_add
+        else:
+            date_added_final = cur_date_added
+        rows.append({"ticker": ticker, "date_added": date_added_final, "date_removed": pd.NaT})
+        return rows, False
+
+    if open_add is not None:
+        # Dangling add for a ticker not in the current table is almost always
+        # a rename whose "removal" was never logged in the changes table
+        # (FB→META 2022-06-09, KORS→CPRI 2018, PCLN→BKNG 2018, etc.).
+        # Wikipedia's current table inherits the rename by listing the *new*
+        # symbol with the *original* date_added, so emitting an open-ended
+        # interval for the old symbol would double-count the lineage. Drop
+        # the phantom; Day 9's ticker_aliases.csv handles renames properly.
+        return rows, True
+
+    return rows, False
+
+
+def _build_intervals(
+    current: pd.DataFrame,
+    changes: pd.DataFrame,
+) -> pd.DataFrame:
+    """Walk each ticker's events chronologically and emit one row per interval."""
+    sentinel = pd.Timestamp(changes["date"].min())
+
+    # Per-ticker change events, sorted by date.
+    events: dict[str, list[tuple[pd.Timestamp, str]]] = {}
+    for _, row in changes.iterrows():
+        ts = row["date"]
+        added = row.get("added_ticker")
+        removed = row.get("removed_ticker")
+        if isinstance(added, str) and added and added != "nan":
+            events.setdefault(added, []).append((ts, "add"))
+        if isinstance(removed, str) and removed and removed != "nan":
+            events.setdefault(removed, []).append((ts, "remove"))
+
+    current_by_ticker: dict[str, dict[str, object]] = current.set_index("ticker").to_dict("index")
+
+    all_tickers = set(events.keys()) | set(current_by_ticker.keys())
+    rows: list[dict[str, object]] = []
+    phantoms_dropped: list[str] = []
+
+    for ticker in sorted(all_tickers):
+        # Sort events; on the same date, "add" precedes "remove" so a same-day
+        # rename pair (FB Removed / META Added) doesn't intermix.
+        ev = sorted(events.get(ticker, []), key=lambda x: (x[0], 0 if x[1] == "add" else 1))
+        cur = current_by_ticker.get(ticker)
+        cur_date_added = pd.Timestamp(cur["date_added"]) if cur is not None else None
+
+        ticker_rows, was_phantom = _intervals_for_ticker(ticker, ev, cur_date_added, sentinel)
+        rows.extend(ticker_rows)
+        if was_phantom:
+            phantoms_dropped.append(ticker)
+
+    if phantoms_dropped:
+        print(
+            f"  dropped {len(phantoms_dropped)} phantom-current rows for likely-renamed tickers: "
+            f"{', '.join(sorted(phantoms_dropped))}"
+        )
+    return pd.DataFrame(rows)
+
+
+def _enrich_metadata(
+    intervals: pd.DataFrame,
+    current: pd.DataFrame,
+    changes: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach (name, wiki_sector, wiki_sub_industry, cik_code) to every interval row."""
+    cur_meta = current.set_index("ticker")[["name", "wiki_sector", "wiki_sub_industry", "cik_code"]]
+    out = intervals.join(cur_meta, on="ticker", how="left")
+
+    # Fall back to the changes table's Security columns for tickers not currently listed.
+    fallback_names: dict[str, str] = {}
+    for _, row in changes.iterrows():
+        for tcol, ncol in (
+            ("added_ticker", "added_name"),
+            ("removed_ticker", "removed_name"),
+        ):
+            t = row.get(tcol)
+            n = row.get(ncol)
+            if isinstance(t, str) and isinstance(n, str) and t and n and t != "nan":
+                fallback_names.setdefault(t, n)
+    out["name"] = out["name"].fillna(out["ticker"].map(fallback_names))
+
+    # Final column order matches src/aegis/data/index_membership.py::EXPECTED_COLUMNS.
+    out = out[
+        [
+            "ticker",
+            "name",
+            "wiki_sector",
+            "wiki_sub_industry",
+            "date_added",
+            "date_removed",
+            "cik_code",
+        ]
+    ]
+    return out.sort_values(["date_added", "ticker"]).reset_index(drop=True)
+
+
+def _validate(df: pd.DataFrame) -> None:
+    if len(df) < 640:
+        raise RuntimeError(f"sanity floor: expected >=640 rows, got {len(df)}")
+    if df["ticker"].isna().any():
+        raise RuntimeError("found rows with null ticker")
+    if df["date_added"].isna().any():
+        raise RuntimeError("found rows with null date_added")
+    bad = df["date_removed"].notna() & (df["date_removed"] < df["date_added"])
+    if bool(bad.any()):
+        raise RuntimeError(f"found {int(bad.sum())} rows with date_removed < date_added")
+
+
+def _write_meta(df: pd.DataFrame, csv_path: Path, meta_path: Path, earliest: pd.Timestamp) -> None:
+    csv_sha = sha256_file(csv_path)
+    git_sha = current_git_sha()
+    fetched_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    meta = {
+        "source_url": WIKIPEDIA_URL,
+        "fetched_at_utc": fetched_at,
+        "scraper_git_sha": git_sha,
+        "csv_path": str(csv_path.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "csv_sha256": csv_sha,
+        "row_count": len(df),
+        "current_member_count": int(df["date_removed"].isna().sum()),
+        "historical_removal_count": int(df["date_removed"].notna().sum()),
+        "earliest_change_date": str(earliest.date()),
+        "notes": (
+            "Wikipedia 'Selected changes' table starts ~2009; pre-2009 reconstruction "
+            "treats then-current members as if joining at earliest_change_date. "
+            "Same-day rename pairs (e.g. FB->META 2022-06-09) are not collapsed; "
+            "ticker_aliases.csv (Week 2 Day 9) handles renames."
+        ),
+    }
+    meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    print(f"Fetching {WIKIPEDIA_URL}")
+    html = _fetch_wikipedia(WIKIPEDIA_URL)
+    tables = pd.read_html(StringIO(html))
+    if len(tables) < 2:
+        raise RuntimeError(f"expected >=2 tables on Wikipedia page, got {len(tables)}")
+
+    current = _normalize_current(tables[0])
+    changes = _normalize_changes(tables[1])
+    earliest = changes["date"].min()
+    print(
+        f"  current: {len(current)} rows | changes: {len(changes)} rows | earliest change: {earliest.date()}"
+    )
+
+    intervals = _build_intervals(current, changes)
+    enriched = _enrich_metadata(intervals, current, changes)
+    _validate(enriched)
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    enriched.to_csv(CSV_PATH, index=False, date_format="%Y-%m-%d")
+    _write_meta(enriched, CSV_PATH, META_PATH, earliest)
+
+    csv_sha = sha256_file(CSV_PATH)
+    print(f"Wrote {CSV_PATH.relative_to(REPO_ROOT)}")
+    print(
+        f"  rows={len(enriched)} | current={int(enriched['date_removed'].isna().sum())} "
+        f"| historical={int(enriched['date_removed'].notna().sum())}"
+    )
+    print(f"  sha256={csv_sha}")
+    print(f"Wrote {META_PATH.relative_to(REPO_ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

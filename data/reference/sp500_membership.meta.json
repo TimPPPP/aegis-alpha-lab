@@ -1,0 +1,12 @@
+{
+  "source_url": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+  "fetched_at_utc": "2026-04-27T22:33:05Z",
+  "scraper_git_sha": "bb32ff72e1fac11c27864976d356da2b95108aed",
+  "csv_path": "data/reference/sp500_membership.csv",
+  "csv_sha256": "4f3ac06180a596728efdbd11e900a8a4c4b8bab2efbac64084b3814a07dff51d",
+  "row_count": 880,
+  "current_member_count": 503,
+  "historical_removal_count": 377,
+  "earliest_change_date": "1976-07-01",
+  "notes": "Wikipedia 'Selected changes' table starts ~2009; pre-2009 reconstruction treats then-current members as if joining at earliest_change_date. Same-day rename pairs (e.g. FB->META 2022-06-09) are not collapsed; ticker_aliases.csv (Week 2 Day 9) handles renames."
+}

@@ -26,7 +26,15 @@ env/
 # uv.lock IS tracked (reproducibility). Python venv is not.
 
 # Data artifacts — never commit. WRDS terms + disk size both forbid it.
-data/
+# Two-step rule: (1) ignore everything *inside* the repo-root data/ directory,
+# (2) un-ignore the curated data/reference/ subtree. The leading slash anchors
+# to repo root — without it the rule would also catch src/aegis/data/, which
+# would silently drop the data module from commits (this happened in Week 1).
+# Per-extension rules (*.parquet, *.sqlite, …) provide defense in depth so a
+# stray data artifact outside /data/ is also caught.
+/data/*
+!/data/reference/
+
 *.parquet
 *.arrow
 *.feather

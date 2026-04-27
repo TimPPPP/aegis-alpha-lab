@@ -5,7 +5,7 @@
 
 ## Week 2 priorities
 
-Week 2 has exactly two hard objectives and one conditional one.
+Week 2 has two hard objectives and one hard operational deliverable with a synthetic fallback if Polygon has an outage.
 
 1. **Date-aware universe realism** — replace the Week 1 survivor-only hardcoded list with a reconstructed S&P 500 universe that respects additions, removals, and delisting boundaries. Built from historical index membership + delisting-aware Polygon metadata + a small manual ticker-rename reconciliation table.
 2. **Ledger verification** — a working `verify()` engine that proves any ledger row still matches its on-disk artifacts (checksum + config hash + git SHA). Unblocks spec §6 Module B acceptance.

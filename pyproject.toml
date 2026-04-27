@@ -40,6 +40,9 @@ dependencies = [
     "structlog>=24.1",
     # Polygon.io data access (replaces WRDS after Rice denial 2026-04-23)
     "polygon-api-client>=1.14",
+    # Wikipedia HTML scraping for index-membership reconstruction (Week 2)
+    "beautifulsoup4>=4.12",
+    "lxml>=5.2",
 ]
 
 [project.optional-dependencies]
@@ -114,7 +117,7 @@ ignore = [
     "RUF001",   # ambiguous-unicode-character-string
     "RUF002",   # ambiguous-unicode-character-docstring
     "RUF003",   # ambiguous-unicode-character-comment
-    "PD901",    # `df` is the idiomatic DataFrame variable name in pandas-vet-heavy code
+    "PD901",    # `df` is idiomatic in pandas code; rule removed in ruff>=0.5 but pre-commit pins v0.4.10
 ]
 
 [tool.ruff.lint.per-file-ignores]
