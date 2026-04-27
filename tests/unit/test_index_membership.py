@@ -102,6 +102,6 @@ def test_active_on_is_filtration_measurable(membership: pd.DataFrame) -> None:
     # or stray strict-vs-non-strict inequality.
     for ticker in full_actives:
         rows = membership[membership["ticker"] == ticker]
-        assert (
-            rows["date_added"] <= ts
-        ).any(), f"{ticker} active on {t} but no row has date_added <= {t}"
+        assert (rows["date_added"] <= ts).any(), (
+            f"{ticker} active on {t} but no row has date_added <= {t}"
+        )

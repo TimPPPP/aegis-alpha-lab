@@ -206,9 +206,9 @@ def test_store_module_has_no_update_or_delete_exports() -> None:
             f"Found update_* in store.__all__: {fn_name}. The ledger is "
             "append-only — write a new experiment instead of updating a past row."
         )
-        assert not fn_name.startswith(
-            "delete_"
-        ), f"Found delete_* in store.__all__: {fn_name}. The ledger is append-only."
+        assert not fn_name.startswith("delete_"), (
+            f"Found delete_* in store.__all__: {fn_name}. The ledger is append-only."
+        )
     # Also check: no common "mutate" names sneaked in as bare attributes
     for name in ("update_candidate_status", "delete_experiment", "purge_ledger"):
         assert not hasattr(store, name), f"store exposes {name} — violates append-only"

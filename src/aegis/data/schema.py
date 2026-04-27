@@ -128,8 +128,7 @@ class UniverseRow(_FrozenRow):
         all_passed = self.price_ok and self.history_ok and self.exchange_ok and self.common_share_ok
         if self.eligible_flag and not all_passed:
             raise ValueError(
-                "eligible_flag=True but at least one rule is False; universe "
-                "filter is inconsistent"
+                "eligible_flag=True but at least one rule is False; universe filter is inconsistent"
             )
         if self.eligible_flag and self.fail_reason is not None:
             raise ValueError("eligible_flag=True but fail_reason is non-null")

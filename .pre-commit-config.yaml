@@ -12,8 +12,10 @@ repos:
       - id: mixed-line-ending
         args: ["--fix=lf"]
 
+  # Pinned to match uv.lock's resolved ruff version. Bump in lockstep with
+  # `uv lock` ruff updates so pre-commit and `uv run ruff` never disagree.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.10
+    rev: v0.15.11
     hooks:
       - id: ruff
         args: [--fix]
