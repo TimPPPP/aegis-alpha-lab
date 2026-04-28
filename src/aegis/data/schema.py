@@ -166,10 +166,85 @@ class SP500MembershipRow(_FrozenRow):
         return self
 
 
+class TickerMetadataRow(_FrozenRow):
+    """One row of Polygon ticker reference metadata (Week 2 Day 9).
+
+    Used by :mod:`aegis.data.ticker_reference` to answer "was this specific
+    ticker actually listed on date t?" — the per-ticker tradability check
+    that complements Day 8's index-membership gate.
+
+    ``delisted_date`` is None for currently-active tickers. Boundary
+    semantics match :func:`aegis.data.index_membership.active_on`:
+    ``list_date <= t < delisted_date`` (inclusive at list, exclusive at
+    delist), per spec §4.1 t-1 discipline.
+
+    The ``sic_*`` columns ship the raw Polygon SIC payload — we deliberately
+    do NOT call them ``gics_*`` (terminology discipline; SIC is not GICS).
+    Sector-proxy enrichment (SIC → coarse sector mapping) lands in Week 3.
+    """
+
+    ticker: str = Field(min_length=1, max_length=16)
+    name: str | None = None
+    primary_exchange: str | None = None
+    ticker_type: str | None = None  # Polygon's "CS"/"PFD"/"ETF"/... raw string
+    list_date: date | None = None
+    delisted_date: date | None = None
+    sic_code: str | None = None  # Polygon returns SIC as 4-digit string
+    sic_description: str | None = None
+    cik: int | None = None
+
+    @model_validator(mode="after")
+    def _delisted_after_listed(self) -> TickerMetadataRow:
+        if (
+            self.delisted_date is not None
+            and self.list_date is not None
+            and self.delisted_date < self.list_date
+        ):
+            raise ValueError(
+                f"delisted_date={self.delisted_date} precedes list_date={self.list_date}"
+            )
+        return self
+
+
+class TickerAliasRow(_FrozenRow):
+    """One historical ticker-rename interval (Week 2 Day 9).
+
+    Encodes "during ``[effective_from, effective_to)``, the entity now
+    known as ``canonical_ticker`` was traded under symbol ``alias``".
+    Both endpoints can be None (NaT in pandas): ``effective_from=None``
+    means "from the beginning of trading", ``effective_to=None`` means
+    "still the active symbol" (rare — usually the canonical itself
+    fills that period).
+
+    Scope: small by design (~10–20 entries), high-impact reconciliation
+    cases only. NOT a full historical security master.
+    """
+
+    canonical_ticker: str = Field(min_length=1, max_length=16)
+    alias: str = Field(min_length=1, max_length=16)
+    effective_from: date | None = None
+    effective_to: date | None = None
+    note: str = Field(default="")
+
+    @model_validator(mode="after")
+    def _to_after_from(self) -> TickerAliasRow:
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to < self.effective_from
+        ):
+            raise ValueError(
+                f"effective_to={self.effective_to} precedes effective_from={self.effective_from}"
+            )
+        return self
+
+
 __all__ = [
     "ExchangeCode",
     "SP500MembershipRow",
     "StockDailyRow",
+    "TickerAliasRow",
+    "TickerMetadataRow",
     "TickerType",
     "UniverseRow",
 ]

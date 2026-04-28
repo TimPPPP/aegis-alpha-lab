@@ -35,6 +35,12 @@ env/
 /data/*
 !/data/reference/
 
+# Generated provenance sidecars for *.parquet artifacts (Day 9 onward) stay
+# in lockstep with their parquet siblings: the sp500_membership.meta.json
+# sidecar IS tracked (its CSV is checked in); the ticker_metadata.meta.json
+# sidecar is NOT tracked (its parquet is gitignored).
+/data/reference/ticker_metadata.meta.json
+
 *.parquet
 *.arrow
 *.feather
