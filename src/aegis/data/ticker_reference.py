@@ -40,10 +40,13 @@ Coverage caveats
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
+
+from aegis.data.index_membership import active_on
 
 METADATA_COLUMNS: tuple[str, ...] = (
     "ticker",
@@ -64,6 +67,25 @@ ALIAS_COLUMNS: tuple[str, ...] = (
     "effective_to",
     "note",
 )
+
+DROP_METADATA_MISSING = "metadata_missing"
+DROP_NOT_ACTIVE_ON_DATE = "not_active_on_date"
+
+
+@dataclass(frozen=True)
+class ResolvedUniverse:
+    """Tradable ticker list resolved from date-aware membership.
+
+    ``requested_count`` is the raw S&P membership count before symbol
+    reconciliation and tradability checks. ``tickers`` is the deterministic
+    Polygon query list after alias resolution and metadata gating.
+    ``dropped`` records fail-closed decisions as ``(membership_ticker,
+    reason)`` for auditability.
+    """
+
+    tickers: tuple[str, ...]
+    requested_count: int
+    dropped: tuple[tuple[str, str], ...]
 
 
 def load_ticker_metadata(path: Path) -> pd.DataFrame:
@@ -200,12 +222,68 @@ def sector_for(ticker: str, metadata: pd.DataFrame) -> str | None:
     return str(val)
 
 
+def resolve_sp500_universe_for_date(
+    sample_date: date,
+    membership: pd.DataFrame,
+    metadata: pd.DataFrame,
+    aliases: pd.DataFrame,
+) -> ResolvedUniverse:
+    """Resolve S&P 500 membership into a date-tradable Polygon ticker list.
+
+    Resolution order:
+    1. ``active_on(sample_date, membership)`` supplies the raw index names.
+    2. ``canonicalize_ticker`` maps current/canonical symbols back to the
+       symbol traded on ``sample_date`` where a continuing lineage has a
+       known ticker rename.
+    3. ``is_active_on`` verifies the resolved ticker was listed on the date.
+
+    Missing metadata, future-listed tickers, delisted tickers, and ambiguous
+    ticker reuse all fail closed. If two membership rows collapse to the same
+    resolved ticker, the alias table is ambiguous and the function raises
+    rather than silently double-counting a security.
+    """
+    requested = tuple(sorted(active_on(sample_date, membership)))
+    resolved_by_source: dict[str, str] = {}
+    source_by_resolved: dict[str, str] = {}
+    dropped: list[tuple[str, str]] = []
+
+    metadata_tickers = set(metadata["ticker"].astype(str))
+
+    for ticker in requested:
+        resolved = canonicalize_ticker(ticker, sample_date, aliases)
+        if resolved not in metadata_tickers:
+            dropped.append((ticker, f"{DROP_METADATA_MISSING}:{resolved}"))
+            continue
+        if not is_active_on(resolved, sample_date, metadata):
+            dropped.append((ticker, f"{DROP_NOT_ACTIVE_ON_DATE}:{resolved}"))
+            continue
+
+        prior_source = source_by_resolved.get(resolved)
+        if prior_source is not None and prior_source != ticker:
+            raise ValueError(
+                "alias collision while resolving S&P 500 universe for "
+                f"{sample_date}: {prior_source!r} and {ticker!r} both resolve to {resolved!r}"
+            )
+        source_by_resolved[resolved] = ticker
+        resolved_by_source[ticker] = resolved
+
+    return ResolvedUniverse(
+        tickers=tuple(sorted(resolved_by_source.values())),
+        requested_count=len(requested),
+        dropped=tuple(sorted(dropped)),
+    )
+
+
 __all__ = [
     "ALIAS_COLUMNS",
+    "DROP_METADATA_MISSING",
+    "DROP_NOT_ACTIVE_ON_DATE",
     "METADATA_COLUMNS",
+    "ResolvedUniverse",
     "canonicalize_ticker",
     "is_active_on",
     "load_ticker_aliases",
     "load_ticker_metadata",
+    "resolve_sp500_universe_for_date",
     "sector_for",
 ]

@@ -11,8 +11,9 @@ answers four independent questions about the ledger row:
    stored ``experiments.config_hash``.
 3. **Is the code reachable?** ``git cat-file -e <git_sha>`` resolves the
    recorded SHA in the current repo.
-4. **Does it all add up?** ``all_ok`` is the conjunction of "no failed
-   artifacts", ``config_hash_match``, and ``git_sha_available``.
+4. **Does it all add up?** ``all_ok`` is the conjunction of "at least one
+   artifact verified with no failures", config hash OK when checked, and
+   ``git_sha_available``.
 
 The function is **non-throwing** (always returns a report, even on missing
 files / corrupted bytes / pruned SHAs) and **non-mutating** (opens the
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 # stringly-typed comparisons sprinkled across the codebase).
 FAILURE_FILE_MISSING = "file_missing"
 FAILURE_CHECKSUM_MISMATCH = "checksum_mismatch"
+FAILURE_NO_ARTIFACTS_RECORDED = "no_artifacts_recorded"
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,7 @@ class ReplayReport:
     artifacts_failed: list[tuple[str, str]]
     config_hash_recorded: str
     config_hash_current: str
+    config_hash_checked: bool
     config_hash_match: bool
     git_sha_recorded: str
     git_sha_available: bool
@@ -99,6 +102,8 @@ def verify(
     candidate_id: UUID,
     ledger_path: Path,
     cfg: AegisConfig | None = None,
+    *,
+    check_config: bool = True,
 ) -> ReplayReport:
     """Verify a candidate's artifacts, config hash, and git SHA against the ledger.
 
@@ -120,6 +125,12 @@ def verify(
         Pass ``None`` (the default) to auto-load via :func:`aegis.config.load_all`.
         Mainly an injection point for tests; real CLI usage relies on the
         default.
+    check_config
+        When False, skip config loading/comparison entirely. This is for
+        operational artifact/git verification when the local config tree is
+        intentionally unavailable or known to have drifted. The returned
+        report marks ``config_hash_checked=False`` and ``all_ok`` ignores
+        config hash equality.
 
     Raises
     ------
@@ -144,6 +155,8 @@ def verify(
     # 2. Verify each artifact: existence + sha256_file vs stored.
     failed: list[tuple[str, str]] = []
     verified = 0
+    if not prov.artifacts:
+        failed.append(("<ledger>", FAILURE_NO_ARTIFACTS_RECORDED))
     for art in prov.artifacts:
         path = Path(art.path)
         if not path.exists():
@@ -157,7 +170,10 @@ def verify(
     # 3. Compare config hashes. If cfg wasn't passed, load_all() may fail on
     #    a broken on-disk YAML — fold that into a sentinel current hash so
     #    the report still returns truthfully.
-    if cfg is None:
+    if not check_config:
+        config_hash_current = "<skipped>"
+        config_hash_match = False
+    elif cfg is None:
         try:
             from aegis.config import load_all
 
@@ -167,15 +183,16 @@ def verify(
             config_hash_current = f"<load-failed: {type(e).__name__}: {e}>"
         else:
             pass
+        config_hash_match = config_hash_current == prov.config_hash
     else:
         config_hash_current = cfg.content_hash()
-
-    config_hash_match = config_hash_current == prov.config_hash
+        config_hash_match = config_hash_current == prov.config_hash
 
     # 4. Resolve git SHA.
     git_sha_available = _check_git_sha(prov.git_sha)
 
-    all_ok = not failed and config_hash_match and git_sha_available
+    config_ok = (not check_config) or config_hash_match
+    all_ok = not failed and verified > 0 and config_ok and git_sha_available
 
     return ReplayReport(
         candidate_id=prov.candidate_id,
@@ -183,6 +200,7 @@ def verify(
         artifacts_failed=failed,
         config_hash_recorded=prov.config_hash,
         config_hash_current=config_hash_current,
+        config_hash_checked=check_config,
         config_hash_match=config_hash_match,
         git_sha_recorded=prov.git_sha,
         git_sha_available=git_sha_available,
@@ -209,6 +227,7 @@ def replay(candidate_id: UUID, ledger_path: Path | None = None) -> None:
 __all__ = [
     "FAILURE_CHECKSUM_MISMATCH",
     "FAILURE_FILE_MISSING",
+    "FAILURE_NO_ARTIFACTS_RECORDED",
     "ReplayReport",
     "replay",
     "verify",

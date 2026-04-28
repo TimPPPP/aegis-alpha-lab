@@ -22,7 +22,12 @@ from pathlib import Path
 
 from aegis.backtest._common import SliceResult, _run_factor_slice
 from aegis.config import AegisConfig
-from aegis.data.index_membership import active_on, load_sp500_membership
+from aegis.data.index_membership import load_sp500_membership
+from aegis.data.ticker_reference import (
+    load_ticker_aliases,
+    load_ticker_metadata,
+    resolve_sp500_universe_for_date,
+)
 
 EXPERIMENT_NAME_PREFIX: str = "week2_full_universe"
 
@@ -60,13 +65,19 @@ def run_full_slice(
         RuntimeError: If ``active_on(sample_date, …)`` returns 0 tickers
             (e.g. the membership CSV doesn't cover ``sample_date``).
     """
-    membership_path = cfg.data.paths.reference / "sp500_membership.csv"
+    reference_path = cfg.data.paths.reference
+    membership_path = reference_path / "sp500_membership.csv"
+    metadata_path = reference_path / "ticker_metadata.parquet"
+    aliases_path = reference_path / "ticker_aliases.csv"
+
     membership = load_sp500_membership(membership_path)
-    tickers = sorted(active_on(sample_date, membership))
-    if not tickers:
+    metadata = load_ticker_metadata(metadata_path)
+    aliases = load_ticker_aliases(aliases_path)
+    universe = resolve_sp500_universe_for_date(sample_date, membership, metadata, aliases)
+    if not universe.tickers:
         raise RuntimeError(
-            f"active_on({sample_date}) returned 0 tickers from {membership_path} — "
-            f"check that the membership CSV covers this date"
+            f"resolve_sp500_universe_for_date({sample_date}) returned 0 tradable "
+            f"tickers from {membership_path}, {metadata_path}, and {aliases_path}"
         )
 
     experiment_name = f"{EXPERIMENT_NAME_PREFIX}_{sample_date.isoformat()}"
@@ -81,11 +92,12 @@ def run_full_slice(
     return _run_factor_slice(
         cfg,
         ledger_path,
-        tickers=tickers,
+        tickers=universe.tickers,
         experiment_name=experiment_name,
         sleep_between_calls=sleep_between_calls,
         panel_filename=panel_filename,
         factor_filename=factor_filename,
+        metadata_as_of=sample_date,
     )
 
 

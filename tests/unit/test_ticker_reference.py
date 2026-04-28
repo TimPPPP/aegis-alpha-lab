@@ -23,11 +23,13 @@ import pytest
 
 from aegis.data.ticker_reference import (
     ALIAS_COLUMNS,
+    DROP_NOT_ACTIVE_ON_DATE,
     METADATA_COLUMNS,
     canonicalize_ticker,
     is_active_on,
     load_ticker_aliases,
     load_ticker_metadata,
+    resolve_sp500_universe_for_date,
 )
 
 # tests/unit/test_ticker_reference.py -> repo root is two parents up.
@@ -55,6 +57,51 @@ def metadata() -> pd.DataFrame:
 @pytest.fixture(scope="module")
 def aliases() -> pd.DataFrame:
     return load_ticker_aliases(_ALIASES_PATH)
+
+
+def _membership(rows: list[tuple[str, str, str | None, str | None]]) -> pd.DataFrame:
+    """Synthetic membership rows: ticker, name, date_added, date_removed."""
+    return pd.DataFrame(
+        {
+            "ticker": [r[0] for r in rows],
+            "name": [r[1] for r in rows],
+            "wiki_sector": [None] * len(rows),
+            "wiki_sub_industry": [None] * len(rows),
+            "date_added": pd.to_datetime([r[2] for r in rows]),
+            "date_removed": pd.to_datetime([r[3] for r in rows]),
+            "cik_code": pd.array([pd.NA] * len(rows), dtype="Int64"),
+        }
+    )
+
+
+def _metadata(rows: list[tuple[str, str | None, str | None]]) -> pd.DataFrame:
+    """Synthetic metadata rows: ticker, list_date, delisted_date."""
+    return pd.DataFrame(
+        {
+            "ticker": [r[0] for r in rows],
+            "name": [f"{r[0]} Corp" for r in rows],
+            "primary_exchange": ["XNYS"] * len(rows),
+            "ticker_type": ["CS"] * len(rows),
+            "list_date": pd.to_datetime([r[1] for r in rows]),
+            "delisted_date": pd.to_datetime([r[2] for r in rows]),
+            "sic_code": [None] * len(rows),
+            "sic_description": [None] * len(rows),
+            "cik": pd.array([pd.NA] * len(rows), dtype="Int64"),
+        }
+    )
+
+
+def _aliases(rows: list[tuple[str, str, str | None, str | None]]) -> pd.DataFrame:
+    """Synthetic aliases: canonical, alias, effective_from, effective_to."""
+    return pd.DataFrame(
+        {
+            "canonical_ticker": [r[0] for r in rows],
+            "alias": [r[1] for r in rows],
+            "effective_from": pd.to_datetime([r[2] for r in rows]),
+            "effective_to": pd.to_datetime([r[3] for r in rows]),
+            "note": [""] * len(rows),
+        }
+    )
 
 
 # --- Test 1: known-delisted tickers carry a delisted_date ---------------------
@@ -137,6 +184,109 @@ def test_canonicalize_ticker_identity(aliases: pd.DataFrame) -> None:
     for d in (date(2010, 1, 1), date(2020, 6, 15), date(2026, 4, 27)):
         assert canonicalize_ticker("AAPL", d, aliases) == "AAPL"
         assert canonicalize_ticker("MSFT", d, aliases) == "MSFT"
+
+
+def test_resolve_sp500_universe_drops_future_ticker_reuse() -> None:
+    """Qnity's Q did not trade on 2025-06-15; IQVIA's IQV did."""
+    membership = _membership(
+        [
+            ("Q", "Qnity Electronics", "2017-08-29", None),
+            ("IQV", "IQVIA", "2017-08-29", None),
+        ]
+    )
+    metadata = _metadata(
+        [
+            ("Q", "2025-11-03", None),
+            ("IQV", "2013-05-09", None),
+        ]
+    )
+
+    resolved = resolve_sp500_universe_for_date(
+        date(2025, 6, 15), membership, metadata, _aliases([])
+    )
+
+    assert resolved.requested_count == 2
+    assert resolved.tickers == ("IQV",)
+    assert resolved.dropped == (("Q", f"{DROP_NOT_ACTIVE_ON_DATE}:Q"),)
+
+
+def test_resolve_sp500_universe_applies_dated_aliases() -> None:
+    """MRSH/MMC and FB/META resolve by the symbol active on the sample date."""
+    membership = _membership(
+        [
+            ("MRSH", "Marsh McLennan", "1987-08-31", None),
+            ("META", "Meta Platforms", "2013-12-23", None),
+        ]
+    )
+    metadata = _metadata(
+        [
+            ("MMC", "1969-06-04", "2026-01-14"),
+            ("MRSH", "2026-01-14", None),
+            ("FB", "2012-05-18", "2022-06-09"),
+            ("META", "2012-05-18", None),
+        ]
+    )
+    aliases = _aliases(
+        [
+            ("MRSH", "MMC", None, "2026-01-14"),
+            ("META", "FB", None, "2022-06-09"),
+        ]
+    )
+
+    pre_meta = resolve_sp500_universe_for_date(date(2018, 6, 15), membership, metadata, aliases)
+    post_meta = resolve_sp500_universe_for_date(date(2025, 6, 15), membership, metadata, aliases)
+    post_mrsh = resolve_sp500_universe_for_date(date(2026, 2, 1), membership, metadata, aliases)
+
+    assert pre_meta.tickers == ("FB", "MMC")
+    assert post_meta.tickers == ("META", "MMC")
+    assert post_mrsh.tickers == ("META", "MRSH")
+
+
+def test_resolve_sp500_universe_metadata_excludes_stale_delisted_members() -> None:
+    """Metadata still protects the universe if membership data is stale."""
+    membership = _membership(
+        [
+            ("ATVI", "Activision Blizzard", "2015-08-28", None),
+            ("CELG", "Celgene", "1976-07-01", None),
+            ("TWTR", "Twitter", "2018-06-07", None),
+        ]
+    )
+    metadata = _metadata(
+        [
+            ("ATVI", "1993-10-22", "2023-10-18"),
+            ("CELG", "1987-07-24", "2019-11-21"),
+            ("TWTR", "2013-11-07", "2022-11-01"),
+        ]
+    )
+
+    resolved = resolve_sp500_universe_for_date(date(2024, 1, 2), membership, metadata, _aliases([]))
+
+    assert resolved.tickers == ()
+    assert resolved.dropped == (
+        ("ATVI", f"{DROP_NOT_ACTIVE_ON_DATE}:ATVI"),
+        ("CELG", f"{DROP_NOT_ACTIVE_ON_DATE}:CELG"),
+        ("TWTR", f"{DROP_NOT_ACTIVE_ON_DATE}:TWTR"),
+    )
+
+
+def test_resolve_sp500_universe_alias_collision_fails_loudly() -> None:
+    """Two membership rows resolving to one query ticker would double-count a security."""
+    membership = _membership(
+        [
+            ("AAA", "Alpha", "2010-01-01", None),
+            ("BBB", "Beta", "2010-01-01", None),
+        ]
+    )
+    metadata = _metadata([("ZZZ", "2000-01-01", None)])
+    aliases = _aliases(
+        [
+            ("AAA", "ZZZ", None, "2030-01-01"),
+            ("BBB", "ZZZ", None, "2030-01-01"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="alias collision"):
+        resolve_sp500_universe_for_date(date(2025, 6, 15), membership, metadata, aliases)
 
 
 # --- Test 6: survivorship-tracker acceptance (per reviewer's note) ------------

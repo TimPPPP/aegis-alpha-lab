@@ -346,6 +346,7 @@ def pipeline_fixture(
         tickers=None,
         sleep_between_calls: float = 0.0,
         panel_filename: str | None = None,
+        metadata_as_of=None,
     ) -> Path:
         return panel_path
 

@@ -24,6 +24,7 @@ from aegis.config import AegisConfig
 from aegis.ledger import (
     FAILURE_CHECKSUM_MISMATCH,
     FAILURE_FILE_MISSING,
+    FAILURE_NO_ARTIFACTS_RECORDED,
     store,
     verify,
 )
@@ -136,6 +137,54 @@ def test_replay_detects_config_hash_drift(
     assert report.artifacts_verified == 2
     assert report.artifacts_failed == []
     assert report.all_ok is False
+
+
+def test_replay_detects_candidate_with_no_artifacts(
+    pipeline_fixture: tuple[AegisConfig, Path],
+    patched_git_sha: None,
+) -> None:
+    """A candidate with no artifact rows cannot pass verify-mode replay."""
+    cfg, ledger_path = pipeline_fixture
+    with open_ledger(ledger_path) as session:
+        exp_id = register_experiment(
+            session,
+            name="artifactless",
+            config_hash=cfg.content_hash(),
+            git_sha="abc1234",
+        )
+        cand_id = register_candidate(
+            session,
+            experiment_id=exp_id,
+            candidate_name="mom_12_1",
+            formula_string="log(P[t-21] / P[t-252])",
+            data_snapshot_id=HASH,
+            status="computed",
+        )
+
+    report = verify(cand_id, ledger_path, cfg)
+
+    assert report.artifacts_verified == 0
+    assert report.artifacts_failed == [("<ledger>", FAILURE_NO_ARTIFACTS_RECORDED)]
+    assert report.all_ok is False
+
+
+def test_replay_can_skip_config_check_without_loading_configs(
+    pipeline_fixture: tuple[AegisConfig, Path],
+    patched_git_sha: None,
+) -> None:
+    """check_config=False skips load_all() and ignores config equality in all_ok."""
+    cfg, ledger_path = pipeline_fixture
+    result = run_week1_slice(cfg, ledger_path, sleep_between_calls=0)
+
+    with patch("aegis.config.load_all", side_effect=RuntimeError("should not load")):
+        report = verify(result.candidate_id, ledger_path, cfg=None, check_config=False)
+
+    assert report.config_hash_checked is False
+    assert report.config_hash_current == "<skipped>"
+    assert report.config_hash_match is False
+    assert report.artifacts_verified == 2
+    assert report.artifacts_failed == []
+    assert report.all_ok is True
 
 
 def test_verify_does_not_mutate_ledger_or_artifacts(

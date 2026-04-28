@@ -276,6 +276,13 @@ _MANUAL_PATCHES: list[tuple] = [
     # Wikipedia's current-table "Date added" of 2019-07-29 is spurious
     # (likely an article-edit artifact). Set to a clearly-pre-2018 date.
     ("update", "TROW", "date_added", pd.Timestamp("1999-04-30")),
+    # Current-table dates for post-transaction successor tickers sometimes
+    # inherit the predecessor's original S&P entry date. Keep the old ticker
+    # active before the transaction and start the current ticker on the
+    # actual rename/split effective date to avoid double-counting one
+    # economic lineage.
+    ("update", "TT", "date_added", pd.Timestamp("2020-03-02")),
+    ("update", "HWM", "date_added", pd.Timestamp("2020-04-01")),
     # FOXA pre-Fox-Corp era (21st Century Fox, 2013-06-19 to 2019-03-19)
     # is missing because Wikipedia represents the rename as a same-day
     # add+remove pair under the same ticker, which our scraper collapses
@@ -307,6 +314,15 @@ _MANUAL_PATCHES: list[tuple] = [
             "date_removed": pd.Timestamp("2024-07-05"),
             "cik_code": 1732845,
         },
+    ),
+    # Q ticker reuse: Qnity did not exist as an independently listed S&P
+    # constituent until 2025-11-03. Wikipedia's current-table metadata can
+    # leak the modern Qnity name backward onto the old Quintiles/IQVIA
+    # change row, creating a false active Q interval through 2025.
+    (
+        "delete_where",
+        "Q",
+        {"date_added": pd.Timestamp("2017-08-29"), "date_removed": pd.Timestamp("2025-11-03")},
     ),
     # Drop the FOXA degenerate (2019-03-19, 2019-03-19) row that our
     # scraper produced from the same-day add+remove pair.

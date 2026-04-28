@@ -74,6 +74,7 @@ def build_panel(
     *,
     sleep_between_calls: float = 12.5,
     panel_filename: str | None = None,
+    metadata_as_of: date | None = None,
 ) -> Path:
     """Build the Week 1 PIT panel end-to-end and write to Parquet.
 
@@ -89,6 +90,10 @@ def build_panel(
             ``cfg.data.snapshot.panel_filename`` (Week 1's filename).
             Day 13's full-universe slice passes a date-tagged filename
             so its artifacts don't collide with Week 1's.
+        metadata_as_of: Optional date for Polygon ticker-details metadata.
+            Full-universe historical runs pass the sample-date anchor so
+            renamed/delisted tickers are classified as they were then, not
+            by today's ticker state.
 
     Returns:
         Path to the written Parquet file.
@@ -100,6 +105,7 @@ def build_panel(
         start=cfg.data.date_range.start,
         end=cfg.data.date_range.end,
         sleep_between_calls=sleep_between_calls,
+        metadata_as_of=metadata_as_of,
     )
     if raw.empty:
         raise RuntimeError(
@@ -144,7 +150,12 @@ def build_panel_for_date(
             f"active_on({sample_date}) returned 0 tickers — check the membership "
             f"CSV; the index reconstruction window may not cover this date"
         )
-    return build_panel(cfg, tickers=tickers, sleep_between_calls=sleep_between_calls)
+    return build_panel(
+        cfg,
+        tickers=tickers,
+        sleep_between_calls=sleep_between_calls,
+        metadata_as_of=sample_date,
+    )
 
 
 def _finalize_panel(raw: pd.DataFrame, cfg: AegisConfig) -> pd.DataFrame:
@@ -182,4 +193,4 @@ def _finalize_panel(raw: pd.DataFrame, cfg: AegisConfig) -> pd.DataFrame:
     return merged.loc[:, list(_PANEL_COLUMNS)].reset_index(drop=True)
 
 
-__all__ = ["WEEK1_TICKERS", "build_panel"]
+__all__ = ["WEEK1_TICKERS", "build_panel", "build_panel_for_date"]

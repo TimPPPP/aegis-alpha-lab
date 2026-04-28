@@ -102,6 +102,7 @@ def load_polygon_daily(
     client: RESTClient | None = None,
     api_key: str | None = None,
     sleep_between_calls: float = _DEFAULT_SLEEP_S,
+    metadata_as_of: date | None = None,
 ) -> pd.DataFrame:
     """Pull daily bars for the given tickers over [start, end].
 
@@ -114,6 +115,9 @@ def load_polygon_daily(
         api_key: Override the ``POLYGON_API_KEY`` env var. Mostly for tests.
         sleep_between_calls: Seconds to sleep between Polygon API calls.
             Defaults to 12.5 (free-tier friendly). Paid-tier users set to 0.
+        metadata_as_of: Optional date passed to Polygon ticker-details calls.
+            Historical universe runs use this to avoid classifying a renamed
+            or delisted symbol using today's ticker state.
 
     Returns:
         Long-format DataFrame with columns listed in :data:`OUTPUT_COLUMNS`.
@@ -140,7 +144,7 @@ def load_polygon_daily(
         if i > 0 and sleep_between_calls > 0:
             time.sleep(sleep_between_calls)
         try:
-            meta = _fetch_ticker_meta(conn, ticker)
+            meta = _fetch_ticker_meta(conn, ticker, metadata_as_of=metadata_as_of)
         except Exception as e:
             skipped.append((ticker, f"meta: {type(e).__name__}: {str(e)[:80]}"))
             continue
@@ -192,9 +196,17 @@ def _make_client(api_key: str | None) -> RESTClient:
     return RESTClient(key)
 
 
-def _fetch_ticker_meta(client: RESTClient, ticker: str) -> _TickerMeta:
+def _fetch_ticker_meta(
+    client: RESTClient,
+    ticker: str,
+    *,
+    metadata_as_of: date | None = None,
+) -> _TickerMeta:
     """Pull (ticker_type, primary_exchange, weighted_shares_outstanding)."""
-    details = client.get_ticker_details(ticker)
+    if metadata_as_of is None:
+        details = client.get_ticker_details(ticker)
+    else:
+        details = client.get_ticker_details(ticker, date=metadata_as_of.isoformat())
     raw_type = getattr(details, "type", None) or "OTHER"
     raw_mic = getattr(details, "primary_exchange", None) or ""
     raw_shares = getattr(details, "weighted_shares_outstanding", None) or 0.0

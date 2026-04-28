@@ -555,7 +555,7 @@ CB,Chubb Limited,Financials,Property & Casualty Insurance,2010-07-15,,896159
 TYC,Tyco International,,,2010-08-26,2016-09-06,
 JCI,Johnson Controls,Industrials,Building Products,2010-08-27,,833444
 IR,Ingersoll Rand,Industrials,Industrial Machinery & Supplies & Components,2010-11-17,2020-03-02,1699150
-TT,Trane Technologies,Industrials,Building Products,2010-11-17,,1466258
+TT,Trane Technologies,Industrials,Building Products,2020-03-02,,1466258
 CVC,Cablevision Systems,,,2010-12-17,2016-06-22,
 NFX,Newfield Exploration,,,2010-12-17,2019-02-15,
 FFIV,"F5, Inc.",Information Technology,Communications Equipment,2010-12-20,,1048695
@@ -689,7 +689,7 @@ MTD,Mettler Toledo,Health Care,Life Sciences Tools & Services,2016-09-06,,103764
 CHTR,Charter Communications,Communication Services,Cable & Satellite,2016-09-08,,1091667
 COO,Cooper Companies (The),Health Care,Health Care Supplies,2016-09-23,,711404
 COTY,Coty,,,2016-09-30,2020-09-21,
-HWM,Howmet Aerospace,Industrials,Aerospace & Defense,2016-10-21,,4281
+HWM,Howmet Aerospace,Industrials,Aerospace & Defense,2020-04-01,,4281
 ARNC,Arconic,,,2016-11-01,2020-04-01,
 D,Dominion Energy,Utilities,Multi-Utilities,2016-11-30,,715957
 EVHC,Envision Healthcare,,,2016-12-02,2018-10-11,
@@ -719,7 +719,6 @@ PKG,Packaging Corporation of America,Materials,Paper & Plastic Packaging Product
 RMD,ResMed,Health Care,Health Care Equipment,2017-07-26,,943819
 BHF,Brighthouse Financial,,,2017-08-08,2019-04-02,
 IQV,IQVIA,Health Care,Life Sciences Tools & Services,2017-08-29,,1478242
-Q,Qnity Electronics,Information Technology,Semiconductor Materials & Equipment,2017-08-29,2025-11-03,2058873
 DWDP,DuPont,,,2017-09-01,2019-06-03,
 SBAC,SBA Communications,Real Estate,Telecom Tower REITs,2017-09-01,,1034054
 CDNS,Cadence Design Systems,Information Technology,Application Software,2017-09-18,,813672

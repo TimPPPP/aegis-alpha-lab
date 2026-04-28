@@ -171,7 +171,7 @@ def ledger_replay(
     """
     cfg = None if no_config_check else load_all()
     final_ledger_path = ledger_path or _default_ledger_path()
-    report = verify(UUID(candidate_id), final_ledger_path, cfg)
+    report = verify(UUID(candidate_id), final_ledger_path, cfg, check_config=not no_config_check)
     _print_replay_report(report)
     if not report.all_ok:
         raise typer.Exit(code=1)
@@ -197,14 +197,25 @@ def _print_replay_report(report: ReplayReport) -> None:
 
     color_match = "green" if report.config_hash_match else "red"
     color_git = "green" if report.git_sha_available else "red"
+    config_current = (
+        f"{report.config_hash_current[:16]}…"
+        if report.config_hash_checked
+        else "[yellow]skipped[/]"
+    )
+    config_match = (
+        f"[{color_match}]{report.config_hash_match}[/]"
+        if report.config_hash_checked
+        else "[yellow]skipped[/]"
+    )
     summary_lines = [
         f"candidate_id:        [cyan]{report.candidate_id}[/cyan]",
         f"artifacts_verified:  [green]{report.artifacts_verified}[/green]",
         f"artifacts_failed:    [{'red' if report.artifacts_failed else 'green'}]"
         f"{len(report.artifacts_failed)}[/]",
         f"config_hash_recorded: {report.config_hash_recorded[:16]}…",
-        f"config_hash_current:  {report.config_hash_current[:16]}…",
-        f"config_hash_match:   [{color_match}]{report.config_hash_match}[/]",
+        f"config_hash_current:  {config_current}",
+        f"config_hash_checked:  {report.config_hash_checked}",
+        f"config_hash_match:   {config_match}",
         f"git_sha_recorded:    {report.git_sha_recorded[:12]}…",
         f"git_sha_available:   [{color_git}]{report.git_sha_available}[/]",
     ]

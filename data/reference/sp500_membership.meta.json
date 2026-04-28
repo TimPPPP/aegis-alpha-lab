@@ -3,10 +3,10 @@
   "fetched_at_utc": "2026-04-28T02:37:01Z",
   "scraper_git_sha": "6fd765822435ae84a9b31e62d7e25145ff122590",
   "csv_path": "data/reference/sp500_membership.csv",
-  "csv_sha256": "e2fbc80b176209ed7636fc1583c2943c41d013b4999fe8331a00375ab9310465",
-  "row_count": 881,
+  "csv_sha256": "677fe90e01c506048faef66dbd2b6e30387cd89cdf7e336f196172afde638c90",
+  "row_count": 880,
   "current_member_count": 503,
-  "historical_removal_count": 378,
+  "historical_removal_count": 377,
   "earliest_change_date": "1976-07-01",
-  "notes": "Wikipedia 'Selected changes' table starts ~2009; pre-2009 reconstruction treats then-current members as if joining at earliest_change_date. Same-day rename pairs (e.g. FB->META 2022-06-09) are not collapsed; ticker_aliases.csv (Week 2 Day 9) handles renames."
+  "notes": "Wikipedia 'Selected changes' table starts ~2009; pre-2009 reconstruction treats then-current members as if joining at earliest_change_date. Same-day rename pairs (e.g. FB->META 2022-06-09) are not collapsed; ticker_aliases.csv (Week 2 Day 9) handles renames. Week 2 reality patch removed a false pre-2025 Qnity interval caused by ticker reuse and corrected successor-ticker start dates for TT and HWM."
 }

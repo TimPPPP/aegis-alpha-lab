@@ -196,6 +196,92 @@ def _validate(df: pd.DataFrame) -> None:
         raise RuntimeError(f"sanity floor: expected >=500 rows, got {len(df)}")
 
 
+def _apply_reference_overrides(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply narrow economic-reality patches for ticker reuse / rename gaps.
+
+    These are not a general security master. They cover known S&P 500 cases
+    where a current Polygon ticker-detail row cannot by itself represent the
+    historical trading symbol needed by the Week 2 resolver.
+    """
+    out = df.copy()
+
+    def upsert(row: dict[str, Any]) -> None:
+        nonlocal out
+        mask = out["ticker"] == row["ticker"]
+        if mask.any():
+            for key, value in row.items():
+                out.loc[mask, key] = value
+        else:
+            out = pd.concat([out, pd.DataFrame([row], columns=list(EXPECTED_COLUMNS))])
+
+    # Marsh McLennan changed NYSE ticker from MMC to MRSH effective 2026-01-14.
+    mrsh = out[out["ticker"] == "MRSH"]
+    if not mrsh.empty:
+        base = mrsh.iloc[0].to_dict()
+        mmc = dict(base)
+        mmc.update(
+            {
+                "ticker": "MMC",
+                "name": "Marsh McLennan",
+                "list_date": pd.Timestamp("1969-06-04"),
+                "delisted_date": pd.Timestamp("2026-01-14"),
+            }
+        )
+        upsert(mmc)
+        upsert(
+            {
+                **base,
+                "ticker": "MRSH",
+                "name": "Marsh",
+                "list_date": pd.Timestamp("2026-01-14"),
+                "delisted_date": pd.NaT,
+            }
+        )
+
+    # WestRock was an S&P 500 member from 2015-07-01 until its 2024-07-05
+    # acquisition, but Polygon may not return a clean historical details row.
+    upsert(
+        {
+            "ticker": "WRK",
+            "name": "WestRock",
+            "primary_exchange": "XNYS",
+            "ticker_type": "CS",
+            "list_date": pd.Timestamp("2015-07-01"),
+            "delisted_date": pd.Timestamp("2024-07-05"),
+            "sic_code": "2650",
+            "sic_description": "PAPERBOARD CONTAINERS & BOXES",
+            "cik": 1732845,
+        }
+    )
+
+    # 21st Century Fox Class A/B used FOXA/FOX before the 2019 Fox Corp
+    # transaction; keep the symbols tradable for pre-2019 membership checks.
+    for ticker in ("FOX", "FOXA"):
+        mask = out["ticker"] == ticker
+        if mask.any():
+            out.loc[mask, "list_date"] = pd.Timestamp("2013-06-19")
+
+    # Paramount Global traded as PARA until Paramount Skydance began trading
+    # as PSKY on 2025-08-07. The S&P membership lineage continues, but the
+    # tradable symbol on a pre-merger sample date is PARA.
+    psky = out[out["ticker"] == "PSKY"]
+    if not psky.empty:
+        base = psky.iloc[0].to_dict()
+        para = dict(base)
+        para.update(
+            {
+                "ticker": "PARA",
+                "name": "Paramount Global Class B Common Stock",
+                "list_date": pd.Timestamp("2022-02-16"),
+                "delisted_date": pd.Timestamp("2025-08-07"),
+                "cik": 813828,
+            }
+        )
+        upsert(para)
+
+    return out.sort_values("ticker").reset_index(drop=True)
+
+
 def _write_meta(
     df: pd.DataFrame,
     *,
@@ -266,7 +352,7 @@ def main() -> None:
         time.sleep(SLEEP_BETWEEN_CALLS)
 
     df = pd.DataFrame(rows, columns=list(EXPECTED_COLUMNS))
-    df = df.sort_values("ticker").reset_index(drop=True)
+    df = _apply_reference_overrides(df)
     _validate(df)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

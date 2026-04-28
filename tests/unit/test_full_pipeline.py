@@ -103,6 +103,40 @@ def _synthetic_membership(tickers: list[str]) -> pd.DataFrame:
     )
 
 
+def _synthetic_metadata(
+    tickers: list[str],
+    *,
+    list_date: date = date(2010, 1, 1),
+    delisted_date: date | None = None,
+) -> pd.DataFrame:
+    """Build fake ticker metadata with all tickers tradable unless specified."""
+    return pd.DataFrame(
+        {
+            "ticker": tickers,
+            "name": [f"{t} Holdings Inc" for t in tickers],
+            "primary_exchange": ["XNYS"] * len(tickers),
+            "ticker_type": ["CS"] * len(tickers),
+            "list_date": pd.to_datetime([list_date] * len(tickers)),
+            "delisted_date": pd.to_datetime([delisted_date] * len(tickers)),
+            "sic_code": [None] * len(tickers),
+            "sic_description": [None] * len(tickers),
+            "cik": pd.array(range(len(tickers)), dtype="Int64"),
+        }
+    )
+
+
+def _empty_aliases() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "canonical_ticker": pd.Series(dtype="object"),
+            "alias": pd.Series(dtype="object"),
+            "effective_from": pd.Series(dtype="datetime64[ns]"),
+            "effective_to": pd.Series(dtype="datetime64[ns]"),
+            "note": pd.Series(dtype="object"),
+        }
+    )
+
+
 @pytest.fixture
 def widened_cfg(tmp_path: Path) -> AegisConfig:
     """Cfg with ``processed`` / ``reference`` redirected to tmp_path and a
@@ -158,6 +192,10 @@ def test_full_slice_uses_date_aware_universe(
         }
     )
     monkeypatch.setattr(full_module, "load_sp500_membership", lambda _: membership)
+    monkeypatch.setattr(
+        full_module, "load_ticker_metadata", lambda _: _synthetic_metadata(["AAA", "BBB"])
+    )
+    monkeypatch.setattr(full_module, "load_ticker_aliases", lambda _: _empty_aliases())
 
     captured: list[tuple[str, ...]] = []
 
@@ -195,6 +233,10 @@ def test_full_slice_ledger_records_universe_date(
     rows whose ``name`` field includes the ISO date string."""
     membership = _synthetic_membership(["AAA", "BBB"])
     monkeypatch.setattr(full_module, "load_sp500_membership", lambda _: membership)
+    monkeypatch.setattr(
+        full_module, "load_ticker_metadata", lambda _: _synthetic_metadata(["AAA", "BBB"])
+    )
+    monkeypatch.setattr(full_module, "load_ticker_aliases", lambda _: _empty_aliases())
     monkeypatch.setattr(
         panel_module,
         "load_polygon_daily",
@@ -254,9 +296,31 @@ def test_full_slice_synthetic_500_ticker_fixture_is_sensible(
     See ``docs/plans/week2.md`` lines 234-247 for the criteria. This single
     test pins each one explicitly so a regression on any gate names itself.
     """
-    tickers = [f"S{i:04d}" for i in range(_N_SYNTH_TICKERS)]
-    membership = _synthetic_membership(tickers)
+    base_tickers = [f"S{i:04d}" for i in range(_N_SYNTH_TICKERS - 1)]
+    # REN is a continuing lineage that traded as OLD on the sample date.
+    # FUT is a ticker-reuse guard: it is in the synthetic membership table
+    # but does not list until after sample_date, so the resolver must drop it.
+    membership = _synthetic_membership([*base_tickers, "REN", "FUT"])
+    metadata = pd.concat(
+        [
+            _synthetic_metadata(base_tickers),
+            _synthetic_metadata(["OLD"]),
+            _synthetic_metadata(["FUT"], list_date=date(2026, 1, 1)),
+        ],
+        ignore_index=True,
+    )
+    aliases = pd.DataFrame(
+        {
+            "canonical_ticker": ["REN"],
+            "alias": ["OLD"],
+            "effective_from": [pd.NaT],
+            "effective_to": [pd.Timestamp("2026-01-01")],
+            "note": ["synthetic rename"],
+        }
+    )
     monkeypatch.setattr(full_module, "load_sp500_membership", lambda _: membership)
+    monkeypatch.setattr(full_module, "load_ticker_metadata", lambda _: metadata)
+    monkeypatch.setattr(full_module, "load_ticker_aliases", lambda _: aliases)
     monkeypatch.setattr(
         panel_module,
         "load_polygon_daily",
@@ -285,6 +349,9 @@ def test_full_slice_synthetic_500_ticker_fixture_is_sensible(
     assert panel.shape == (result.panel_rows, 15), (
         f"panel shape {panel.shape} does not match (rows, 15)"
     )
+    assert "OLD" in set(panel["ticker"])
+    assert "REN" not in set(panel["ticker"])
+    assert "FUT" not in set(panel["ticker"])
 
     # Gate 3: factor shape (rows, 8) — Day 5's FactorObservation columns
     factor = pd.read_parquet(result.factor_path)

@@ -24,6 +24,7 @@ of module-level helpers in tests.
 from aegis.ledger.replay import (
     FAILURE_CHECKSUM_MISMATCH,
     FAILURE_FILE_MISSING,
+    FAILURE_NO_ARTIFACTS_RECORDED,
     ReplayReport,
     verify,
 )
@@ -40,6 +41,7 @@ from aegis.ledger.store import (
 __all__ = [
     "FAILURE_CHECKSUM_MISMATCH",
     "FAILURE_FILE_MISSING",
+    "FAILURE_NO_ARTIFACTS_RECORDED",
     "ArtifactRow",
     "ProvenanceRow",
     "ReplayReport",

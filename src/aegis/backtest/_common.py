@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from uuid import UUID
 
@@ -66,6 +67,7 @@ def _run_factor_slice(
     sleep_between_calls: float,
     panel_filename: str | None = None,
     factor_filename: str | None = None,
+    metadata_as_of: date | None = None,
 ) -> SliceResult:
     """Build panel for ``tickers``, compute mom_12_1, write artifacts, ledger.
 
@@ -88,6 +90,7 @@ def _run_factor_slice(
         tickers=list(tickers),
         sleep_between_calls=sleep_between_calls,
         panel_filename=panel_basename,
+        metadata_as_of=metadata_as_of,
     )
     panel = pd.read_parquet(panel_path)
     data_snapshot_id = str(panel["data_snapshot_id"].iloc[0])
