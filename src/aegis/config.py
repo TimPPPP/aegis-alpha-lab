@@ -136,6 +136,10 @@ class DataPaths(_Frozen):
     raw: Path
     interim: Path
     processed: Path
+    # Reference data (small, curated, version-controlled). Holds the S&P 500
+    # membership CSV used by the Day 13 widened-universe slice and any
+    # future reference tables.
+    reference: Path = Path("data/reference")
 
 
 class DataSnapshot(_Frozen):

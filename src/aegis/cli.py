@@ -17,7 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from aegis import __version__
-from aegis.backtest import run_week1_slice
+from aegis.backtest import run_full_slice, run_week1_slice
 from aegis.config import load_all
 from aegis.data.panel import WEEK1_TICKERS, build_panel
 from aegis.ledger import ReplayReport, open_ledger, verify
@@ -268,6 +268,61 @@ def backtest_week1(
     console.print(f"  git_sha          {result.git_sha[:16]}")
     console.print(f"  data_snapshot    {result.data_snapshot_id[:16]}…")
     console.print(f"  ledger           {final_ledger}")
+
+
+@backtest_app.command("full")
+def backtest_full(
+    sample_date: str = typer.Option(
+        ...,
+        "--date",
+        help="Sample date (YYYY-MM-DD) anchoring the S&P 500 universe via active_on().",
+    ),
+    fast: bool = typer.Option(
+        False,
+        "--fast",
+        help="Drop Polygon rate-limit sleep to 0. Only safe above the per-minute ceiling.",
+    ),
+    ledger_path: Path | None = typer.Option(  # noqa: B008 — typer convention
+        None,
+        "--ledger-path",
+        help="Ledger file location. Defaults to AEGIS_LEDGER_PATH, else ./data/ledger.sqlite.",
+    ),
+) -> None:
+    """Run the widened-universe slice: ~500 S&P members on --date, then momentum and ledger.
+
+    Composes Day 8's date-aware membership reconstruction with Week 1's
+    factor pipeline. Produces ~200k-row panel + factor Parquets and three
+    ledger rows (one experiment named ``week2_full_universe_<date>``).
+    Re-runs append; the ledger is append-only.
+
+    Wall time on Polygon Starter (100 calls/min ceiling, 0.6s sleep
+    default): ~15-25 min. ``--fast`` (0s sleep) gambles on the ceiling.
+    Requires POLYGON_API_KEY in the environment (or .env).
+    """
+    from datetime import date as _date
+
+    parsed_date = _date.fromisoformat(sample_date)
+    cfg = load_all()
+    final_ledger = ledger_path or _default_ledger_path()
+    # Polygon Starter is 100 calls/min = 0.6s/call ceiling. 0.6s sleep
+    # leaves no headroom; we use 0.65s to absorb minor jitter unless --fast.
+    sleep_s = 0.0 if fast else 0.65
+
+    result = run_full_slice(cfg, final_ledger, parsed_date, sleep_between_calls=sleep_s)
+
+    console.print(f"[green]OK[/] full slice complete (sample_date={parsed_date.isoformat()})")
+    console.print(f"  experiment_id    {result.experiment_id}")
+    console.print(f"  candidate_id     {result.candidate_id}  (mom_12_1, computed)")
+    console.print(f"  panel            {result.panel_path}  [dim]{result.panel_rows} rows[/]")
+    console.print(
+        f"  factor           {result.factor_path}  "
+        f"[dim]{result.factor_valid_rows} valid / {result.panel_rows}[/]"
+    )
+    console.print(f"  config_hash      {result.config_hash[:16]}…")
+    console.print(f"  git_sha          {result.git_sha[:16]}")
+    console.print(f"  data_snapshot    {result.data_snapshot_id[:16]}…")
+    console.print(f"  ledger           {final_ledger}")
+    console.print(f"\n[dim]To verify this run: uv run aegis ledger replay {result.candidate_id}[/]")
 
 
 @lockbox_app.command("open")

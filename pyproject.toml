@@ -43,6 +43,8 @@ dependencies = [
     # Wikipedia HTML scraping for index-membership reconstruction (Week 2)
     "beautifulsoup4>=4.12",
     "lxml>=5.2",
+    # Process-RSS measurement for the Week 2 Day 13 scale-test memory gate
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]

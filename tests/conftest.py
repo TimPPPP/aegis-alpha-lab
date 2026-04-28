@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import select
 
-from aegis.backtest import week1 as week1_module
+from aegis.backtest import _common as backtest_common_module
 from aegis.config import AegisConfig, load_all
 from aegis.data.panel import _finalize_panel
 from aegis.ledger.schema import Artifact, Candidate, Experiment
@@ -340,11 +340,16 @@ def pipeline_fixture(
     panel_path = tmp_path / test_cfg.data.snapshot.panel_filename
     finalized.to_parquet(panel_path, index=False)
 
-    def _fake_build_panel(cfg: AegisConfig, *, sleep_between_calls: float = 0.0) -> Path:
+    def _fake_build_panel(
+        cfg: AegisConfig, *, tickers=None, sleep_between_calls: float = 0.0
+    ) -> Path:
         return panel_path
 
-    monkeypatch.setattr(week1_module, "build_panel", _fake_build_panel)
-    monkeypatch.setattr(week1_module, "current_git_sha", lambda: FAKE_GIT_SHA)
+    # Patch the names as imported into _common (Day 13 refactor moved the
+    # pipeline body out of week1.py). The Week 1 wrapper resolves these
+    # through _common at call time.
+    monkeypatch.setattr(backtest_common_module, "build_panel", _fake_build_panel)
+    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda: FAKE_GIT_SHA)
 
     ledger_path = tmp_path / "ledger.sqlite"
     return test_cfg, ledger_path

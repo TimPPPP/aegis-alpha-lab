@@ -11,6 +11,7 @@ paths:
   raw:       ./data/raw          # immutable WRDS pulls
   interim:   ./data/interim      # post-adjustment, pre-panel
   processed: ./data/processed    # final Parquet panel + factor outputs
+  reference: ./data/reference    # curated reference tables (sp500_membership.csv, ticker_aliases.csv)
 
 date_range:                      # Week 1 slice — fits Polygon free-tier 2-year window
   start: "2024-06-01"            # ~22 mo back from 2026-04-23 (inside free tier)
