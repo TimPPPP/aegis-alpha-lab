@@ -86,17 +86,17 @@ make docker-run
 
 | Module | Weeks | Status | Delivers |
 |---|---|---|---|
-| A — Data & PIT panel | 1–5 | 🟡 Week 1 slice landed | Polygon.io panel, universe filter; S&P 500 index history deferred to Week 2 |
-| B — Research ledger | alongside A | 🟢 write side done | Append-only SQLite; replay engine is Week 2 |
+| A — Data & PIT panel | 1–5 | 🟢 Week 2 §6 cleared | Polygon.io panel, universe filter, date-aware S&P 500 reconstruction (within 1 name on two ground-truth dates), delisting-aware tradability check |
+| B — Research ledger | alongside A | 🟢 Week 2 §6 cleared (verify-mode) | Append-only SQLite + verify-mode replay (artifact + config + git SHA checksums). Full rebuild-from-source replay is V2 scope. |
 | C — Feature library | 9–12 | 🟡 1/~40 factors landed | `mom_12_1` computes end-to-end; ~39 factors remain |
 | D — Barra-lite risk engine | 6–8 | ⚪ not started | √mcap-WLS styles + industries, EWMA covariance |
 | E — Validation & gate | 13–15 | ⚪ not started | HAC IC, BH-FDR, DSR, FF6 α, decay gate |
 | F — Portfolio & cost | 16–18 | ⚪ not started | Cost-aware QP (OSQP) |
 | Lockbox | 19–20 | ⚪ not started | Freeze code, open 2024–2025 holdout once, post-mortem |
 
-Each module has an acceptance test in `tests/unit/`, marked `xfail(strict=True)` until it lands. When a test stops failing, pytest forces the marker to be removed — the xfails encode the roadmap as machine-readable checkboxes.
+Each module has an acceptance test in `tests/unit/`, marked `xfail(strict=True)` until it lands. When a test stops failing, pytest forces the marker to be removed — the xfails encode the roadmap as machine-readable checkboxes. **Modules A and B are now flipped (Week 2 Days 10 and 12); four xfails remain (C/D/E/F).**
 
-**Data-source note:** spec §7 targets CRSP + Compustat via WRDS. Rice denied WRDS access on 2026-04-23, so V1 runs on Polygon.io ([docs/plans/week1.md](docs/plans/week1.md) documents the pivot). Core invariants (PIT discipline, corporate-action adjustment, measurability) are preserved; survivorship-bias handling and historical index constituency are deferred to Week 2.
+**Data-source note:** spec §7 targets CRSP + Compustat via WRDS. Rice denied WRDS access on 2026-04-23, so V1 runs on Polygon.io Stocks Starter ($29/mo, active 2026-04-24). [docs/plans/week1.md](docs/plans/week1.md) documents the original pivot; [docs/reports/week2.md](docs/reports/week2.md) documents Week 2's universe-realism + verify-mode-replay work. Survivorship handling is now **materially reduced** (NOT "survivorship-bias-free" — terminology discipline matters here).
 
 ## Quantified success criteria (§11)
 
