@@ -13,12 +13,14 @@ from uuid import UUID
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from aegis import __version__
 from aegis.backtest import run_week1_slice
 from aegis.config import load_all
 from aegis.data.panel import WEEK1_TICKERS, build_panel
-from aegis.ledger import open_ledger, replay
+from aegis.ledger import ReplayReport, open_ledger, verify
 from aegis.utils.dotenv import load_dotenv_if_present
 
 # Load .env at CLI import so POLYGON_API_KEY is visible to subcommands without
@@ -144,13 +146,74 @@ def ledger_init(
 
 
 @ledger_app.command("replay")
-def ledger_replay(candidate_id: str = typer.Argument(...)) -> None:
-    """Bit-identical replay of a promoted candidate from the ledger.
+def ledger_replay(
+    candidate_id: str = typer.Argument(..., help="Full UUID of the candidate to verify."),
+    ledger_path: Path | None = typer.Option(  # noqa: B008 — typer convention
+        None,
+        "--ledger-path",
+        help="Ledger file location. Defaults to AEGIS_LEDGER_PATH env var, "
+        "else ./data/ledger.sqlite.",
+    ),
+    no_config_check: bool = typer.Option(
+        False,
+        "--no-config-check",
+        help="Skip the config_hash comparison (useful when configs have "
+        "drifted out-of-band and load_all() would fail).",
+    ),
+) -> None:
+    """Verify a candidate's artifacts, config_hash, and git SHA against the ledger.
 
-    Not implemented yet — Week 2 deliverable. The ledger write-side landed
-    Day 4; the replay executor follows.
+    Verify-mode replay (spec §6 Module B). Reports whether every recorded
+    artifact's bytes still match its checksum, whether the live
+    ``content_hash()`` agrees with the stored config_hash, and whether the
+    recorded git SHA is reachable via ``git cat-file``. Non-throwing,
+    non-mutating — opens the ledger SQLite read-only.
     """
-    replay(UUID(candidate_id))
+    cfg = None if no_config_check else load_all()
+    final_ledger_path = ledger_path or _default_ledger_path()
+    report = verify(UUID(candidate_id), final_ledger_path, cfg)
+    _print_replay_report(report)
+    if not report.all_ok:
+        raise typer.Exit(code=1)
+
+
+def _print_replay_report(report: ReplayReport) -> None:
+    """Render a ReplayReport as a rich table + summary panel."""
+    art_table = Table(title="Artifacts", show_lines=False)
+    art_table.add_column("path", overflow="fold")
+    art_table.add_column("status", justify="center")
+    art_table.add_column("failure_mode", justify="left")
+    # Order: failed first (stand out), then a single "verified" line per pass.
+    for path, mode in report.artifacts_failed:
+        art_table.add_row(path, "[red]FAIL[/red]", mode)
+    if report.artifacts_verified:
+        art_table.add_row(
+            f"({report.artifacts_verified} verified)",
+            "[green]OK[/green]",
+            "",
+        )
+    if not report.artifacts_failed and not report.artifacts_verified:
+        art_table.add_row("(no artifacts recorded)", "[yellow]?[/yellow]", "")
+
+    color_match = "green" if report.config_hash_match else "red"
+    color_git = "green" if report.git_sha_available else "red"
+    summary_lines = [
+        f"candidate_id:        [cyan]{report.candidate_id}[/cyan]",
+        f"artifacts_verified:  [green]{report.artifacts_verified}[/green]",
+        f"artifacts_failed:    [{'red' if report.artifacts_failed else 'green'}]"
+        f"{len(report.artifacts_failed)}[/]",
+        f"config_hash_recorded: {report.config_hash_recorded[:16]}…",
+        f"config_hash_current:  {report.config_hash_current[:16]}…",
+        f"config_hash_match:   [{color_match}]{report.config_hash_match}[/]",
+        f"git_sha_recorded:    {report.git_sha_recorded[:12]}…",
+        f"git_sha_available:   [{color_git}]{report.git_sha_available}[/]",
+    ]
+    final_color = "green" if report.all_ok else "red"
+    final_label = "OK" if report.all_ok else "FAIL"
+
+    console.print(art_table)
+    console.print(Panel("\n".join(summary_lines), title="Provenance"))
+    console.print(f"[bold {final_color}]all_ok = {report.all_ok} ({final_label})[/]")
 
 
 # --- Backtest / Lockbox -------------------------------------------------------

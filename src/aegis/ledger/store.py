@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -171,12 +172,95 @@ def register_artifact(
     return artifact_id
 
 
+# --- Read side (Week 2 Day 11) ----------------------------------------------
+# Read-only access for the verify-mode replay engine. These are pure reads —
+# no inserts, updates, or deletes — so adding them to __all__ does not violate
+# the append-only contract. The two row dataclasses are frozen so callers can
+# pass them around without worrying about accidental mutation.
+
+
+@dataclass(frozen=True)
+class ArtifactRow:
+    """Immutable snapshot of one ``artifacts`` row, detached from the session."""
+
+    artifact_id: UUID
+    artifact_type: str
+    path: str
+    checksum: str
+
+
+@dataclass(frozen=True)
+class ProvenanceRow:
+    """Joined view of (candidate, parent experiment, artifacts) for ``verify()``.
+
+    Returned by :func:`read_candidate_provenance`. Carries every hash the
+    replay engine needs (``config_hash`` from the experiment, ``git_sha`` from
+    the experiment, ``data_snapshot_id`` from the candidate, per-artifact
+    ``checksum`` from artifacts).
+    """
+
+    candidate_id: UUID
+    candidate_name: str
+    formula_string: str
+    data_snapshot_id: str
+    config_hash: str
+    git_sha: str
+    artifacts: tuple[ArtifactRow, ...]
+
+
+def read_candidate_provenance(
+    session: Session,
+    candidate_id: UUID,
+) -> ProvenanceRow:
+    """Read a candidate's full provenance bundle for verify-mode replay.
+
+    Joins ``candidates`` to its parent ``experiments`` and child
+    ``artifacts``. Returns a :class:`ProvenanceRow` detached from the
+    session (frozen dataclass), so the caller can close the session and
+    still use the data.
+
+    Raises
+    ------
+    LookupError
+        If ``candidate_id`` is not in the ``candidates`` table.
+    """
+    candidate = session.get(Candidate, str(candidate_id))
+    if candidate is None:
+        raise LookupError(f"candidate_id {candidate_id} not in ledger")
+    experiment = session.get(Experiment, candidate.experiment_id)
+    if experiment is None:  # pragma: no cover — FK invariant violation
+        raise LookupError(
+            f"candidate {candidate_id} references missing experiment {candidate.experiment_id}"
+        )
+    artifacts = tuple(
+        ArtifactRow(
+            artifact_id=UUID(a.artifact_id),
+            artifact_type=a.artifact_type,
+            path=a.path,
+            checksum=a.checksum,
+        )
+        for a in candidate.artifacts
+    )
+    return ProvenanceRow(
+        candidate_id=UUID(candidate.candidate_id),
+        candidate_name=candidate.candidate_name,
+        formula_string=candidate.formula_string,
+        data_snapshot_id=candidate.data_snapshot_id,
+        config_hash=experiment.config_hash,
+        git_sha=experiment.git_sha,
+        artifacts=artifacts,
+    )
+
+
 # Explicitly list the public surface so tests can assert no UPDATE/DELETE
 # functions have been silently added. If you add ``update_candidate_status``
 # or similar, the append-only contract breaks — instead, write a new
 # experiment or a new candidate.
 __all__ = [
+    "ArtifactRow",
+    "ProvenanceRow",
     "open_ledger",
+    "read_candidate_provenance",
     "register_artifact",
     "register_candidate",
     "register_experiment",
