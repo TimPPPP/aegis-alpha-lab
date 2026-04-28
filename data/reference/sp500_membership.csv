@@ -413,6 +413,7 @@ DHR,Danaher Corporation,Health Care,Life Sciences Tools & Services,1998-11-18,,3
 CPWR,Compuware,,,1998-12-11,2011-12-31,
 CCL,Carnival,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",1998-12-22,,815097
 MCK,McKesson Corporation,Health Care,Health Care Distributors,1999-01-13,,927653
+TROW,T. Rowe Price,Financials,Asset Management & Custody Banks,1999-04-30,,1113169
 AFL,Aflac,Financials,Life & Health Insurance,1999-05-28,,4977
 NTAP,NetApp,Information Technology,"Technology Hardware, Storage & Peripherals",1999-06-25,,1002047
 BBY,Best Buy,Consumer Discretionary,Computer & Electronics Retail,1999-06-29,,764478
@@ -502,7 +503,7 @@ EXPD,Expeditors International,Industrials,Air Freight & Logistics,2007-10-10,,74
 J,Jacobs Solutions,Industrials,Construction & Engineering,2007-10-26,,52988
 AMT,American Tower,Real Estate,Telecom Tower REITs,2007-11-19,,1053507
 GME,GameStop,,,2007-12-13,2016-04-25,
-RRC,Range Resources,,,2007-12-20,2018-06-18,
+RRC,Range Resources,,,2007-12-20,2018-06-15,
 DOC,Healthpeak Properties,Real Estate,Health Care REITs,2008-03-31,,765880
 PM,Philip Morris International,Consumer Staples,Tobacco,2008-03-31,,1413329
 ISRG,Intuitive Surgical,Health Care,Health Care Equipment,2008-06-02,,1035267
@@ -603,6 +604,7 @@ REGN,Regeneron Pharmaceuticals,Health Care,Biotechnology,2013-05-01,,872589
 MAC,Macerich,,,2013-05-08,2019-12-23,
 KSU,Kansas City Southern,,,2013-05-23,2021-12-14,
 GM,General Motors,Consumer Discretionary,Automobile Manufacturers,2013-06-06,,1467858
+FOXA,21st Century Fox / Fox Corporation,Communication Services,Movies & Entertainment,2013-06-19,2019-03-19,
 ZTS,Zoetis,Health Care,Pharmaceuticals,2013-06-21,,1555280
 NLSN,Nielsen Holdings,,,2013-07-08,2022-10-12,
 NWSA,News Corp (Class A),Communication Services,Publishing,2013-08-01,,1564708
@@ -643,6 +645,7 @@ O,Realty Income,Real Estate,Retail REITs,2015-04-07,,726728
 QRVO,Qorvo,,,2015-06-11,2024-12-23,
 BXLT,Baxalta,,,2015-07-01,2016-06-03,
 JBHT,J.B. Hunt,Industrials,Cargo Ground Transportation,2015-07-01,,728535
+WRK,WestRock,Materials,Paper Packaging,2015-07-01,2024-07-05,1732845
 CPGX,Columbia Pipeline Group,,,2015-07-02,2016-07-05,
 KHC,Kraft Heinz,Consumer Staples,Packaged Foods & Meats,2015-07-06,,1637459
 AAP,Advance Auto Parts,,,2015-07-08,2023-08-25,
@@ -672,7 +675,7 @@ FL,Foot Locker,,,2016-04-04,2019-08-09,
 UA,Under Armour (Class C),,,2016-04-08,2022-06-21,
 ULTA,Ulta Beauty,Consumer Discretionary,Other Specialty Retail,2016-04-18,,1403568
 GPN,Global Payments,Financials,Transaction & Payment Processing Services,2016-04-25,,1123360
-AYI,Acuity Brands,,,2016-05-03,2018-06-18,
+AYI,Acuity Brands,,,2016-05-03,2018-06-15,
 ALK,Alaska Air Group,,,2016-05-13,2023-12-18,
 DLR,Digital Realty,Real Estate,Data Center REITs,2016-05-18,,1297996
 LKQ,LKQ Corporation,,,2016-05-23,2025-12-22,
@@ -730,8 +733,8 @@ MSCI,MSCI Inc.,Financials,Financial Exchanges & Data,2018-04-04,,1408198
 ABMD,Abiomed,,,2018-05-31,2022-12-22,
 EVRG,Evergy,Utilities,Electric Utilities,2018-06-05,,1711269
 TWTR,Twitter,,,2018-06-07,2022-11-01,
-BR,Broadridge Financial Solutions,Industrials,Data Processing & Outsourced Services,2018-06-18,,1383312
-HFC,HollyFrontier,,,2018-06-18,2021-06-04,
+BR,Broadridge Financial Solutions,Industrials,Data Processing & Outsourced Services,2018-06-15,,1383312
+HFC,HollyFrontier,,,2018-06-15,2021-06-04,
 CPAY,Corpay,Financials,Transaction & Payment Processing Services,2018-06-20,,1175454
 CPRT,Copart,Industrials,Diversified Support Services,2018-07-02,,900075
 ANET,Arista Networks,Information Technology,Communications Equipment,2018-08-28,,1596532
@@ -750,7 +753,6 @@ ATO,Atmos Energy,Utilities,Gas Utilities,2019-02-15,,731802
 WAB,Wabtec,Industrials,Construction Machinery & Heavy Transportation Equipment,2019-02-27,,943452
 FOX,Fox Corporation (Class B),Communication Services,Broadcasting,2019-03-19,2019-03-19,1754301
 FOX,Fox Corporation (Class B),Communication Services,Broadcasting,2019-03-19,,1754301
-FOXA,Fox Corporation (Class A),Communication Services,Broadcasting,2019-03-19,2019-03-19,1754301
 FOXA,Fox Corporation (Class A),Communication Services,Broadcasting,2019-03-19,,1754301
 DOW,Dow Inc.,Materials,Commodity Chemicals,2019-04-01,,1751788
 CTVA,Corteva,Materials,Fertilizers & Agricultural Chemicals,2019-06-03,,1755672
@@ -759,7 +761,6 @@ AMCR,Amcor,Materials,Paper & Plastic Packaging Products & Materials,2019-06-07,,
 BMS,Bemis,,,2019-06-07,2019-06-11,
 MKTX,MarketAxess,,,2019-07-01,2025-09-22,
 TMUS,T-Mobile US,Communication Services,Wireless Telecommunication Services,2019-07-15,,1283699
-TROW,T. Rowe Price,Financials,Asset Management & Custody Banks,2019-07-29,,1113169
 IEX,IDEX Corporation,Industrials,Industrial Machinery & Supplies & Components,2019-08-09,,832101
 LDOS,Leidos,Industrials,Diversified Support Services,2019-08-09,,1336920
 CDW,CDW Corporation,Information Technology,Technology Distributors,2019-09-23,,1402057

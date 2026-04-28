@@ -1,9 +1,9 @@
 """Module A acceptance + Day 3 unit coverage for the panel builder.
 
-The spec §6 Module A acceptance test (reconstructed S&P 500 membership
-within 1 name) stays ``xfail`` until Week 2 lands the historical-index
-tracker. Everything else — ret_1d math, eligibility propagation, Parquet
-round-trip, snapshot-id stability — is exercised here against the
+Spec §6 Module A acceptance — reconstructed S&P 500 membership within
+1 name on two ground-truth dates — flipped on Week 2 Day 10. Everything
+else (ret_1d math, eligibility propagation, Parquet round-trip,
+snapshot-id stability, build_panel_for_date) is exercised against the
 engineered ``stock_daily_panel`` fixture from conftest (no live Polygon
 calls).
 """
@@ -11,6 +11,7 @@ calls).
 from __future__ import annotations
 
 import math
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -18,15 +19,113 @@ import pytest
 
 from aegis.config import AegisConfig, load_all
 from aegis.data import panel as panel_module
+from aegis.data.index_membership import active_on, load_sp500_membership
 from aegis.data.panel import _PANEL_COLUMNS, _finalize_panel, build_panel
+from aegis.data.ticker_reference import load_ticker_aliases
 from aegis.utils.hashing import sha256_dataframe
 
+# tests/unit/test_panel.py -> repo root is two parents up.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REFERENCE = _REPO_ROOT / "data" / "reference"
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
-# --- Preserved Module A acceptance stub -------------------------------------
-@pytest.mark.xfail(strict=True, reason="Module A S&P 500 index-history deferred to Week 2")
-def test_sp500_reconstruction_within_1_name() -> None:
-    """Reconstructed S&P 500 membership on any past date matches published within 1 name."""
-    raise NotImplementedError
+
+# --- Module A §6 acceptance — Day 10 flip ------------------------------------
+
+
+def _read_ticker_fixture(path: Path) -> set[str]:
+    return {
+        line.strip()
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+
+def _historical_symbol(
+    canonical: str,
+    check_date: date,
+    aliases: pd.DataFrame,
+) -> str | None:
+    """Map ``canonical`` back to whichever symbol the lineage was traded under on ``check_date``.
+
+    Mirrors :func:`aegis.data.ticker_reference.canonicalize_ticker` semantics
+    (walk alias intervals, return the alias active on the date) plus an
+    extra "lineage didn't exist yet" filter: if every alias row for this
+    canonical has ``effective_from > check_date``, the entity hadn't
+    entered the chain yet and we drop it from the comparison entirely.
+    """
+    rows = aliases[aliases["canonical_ticker"] == canonical]
+    if rows.empty:
+        return canonical
+
+    ts = pd.Timestamp(check_date)
+    from_ok = rows["effective_from"].isna() | (rows["effective_from"] <= ts)
+    to_ok = rows["effective_to"].isna() | (ts < rows["effective_to"])
+    matches = rows[from_ok & to_ok]
+    if not matches.empty:
+        return str(matches["alias"].iloc[0])
+
+    # No interval contains check_date. Two cases:
+    # 1. check_date is BEFORE the earliest non-NaT effective_from → lineage hadn't started
+    # 2. check_date is AFTER all effective_to → canonical itself is the active symbol
+    earliest = rows["effective_from"].min()
+    if pd.notna(earliest) and ts < earliest:
+        return None
+    return canonical
+
+
+def _strip_dot(s: str) -> str:
+    return s.replace(".", "")
+
+
+@pytest.mark.parametrize(
+    ("check_date", "fixture_file"),
+    [
+        (date(2018, 6, 15), "sp500_20180615.txt"),  # pre-Tesla era
+        (date(2021, 1, 4), "sp500_20210104.txt"),  # post-Tesla, post-Q4-2020 rebalance
+    ],
+)
+def test_sp500_reconstruction_within_1_name(
+    check_date: date,
+    fixture_file: str,
+) -> None:
+    """Spec §6 Module A — reconstruction matches published constituents within 1 name.
+
+    Two ground-truth dates from different market regimes so a curated
+    snapshot on one era can't mask drift on the other. Source: iShares
+    Core S&P 500 ETF (IVV) historical holdings, fetched verbatim
+    (historical symbols preserved — no canonicalization on the truth side).
+
+    Comparison protocol:
+    1. ``active_on(check_date, membership)`` returns canonical (current)
+       symbols inherited from Wikipedia's current-table.
+    2. Each canonical is mapped backward to its on-date historical symbol
+       via :func:`_historical_symbol` (driven by ``ticker_aliases.csv``).
+       Lineages that didn't exist on ``check_date`` are dropped.
+    3. Both sides are dot-stripped (iShares strips Class B notation,
+       Wikipedia preserves it) before computing symmetric_difference.
+    """
+    membership = load_sp500_membership(_REFERENCE / "sp500_membership.csv")
+    aliases = load_ticker_aliases(_REFERENCE / "ticker_aliases.csv")
+
+    candidates = active_on(check_date, membership)
+    reconstructed: set[str] = set()
+    for canonical in candidates:
+        sym = _historical_symbol(canonical, check_date, aliases)
+        if sym is not None:
+            reconstructed.add(sym)
+
+    truth = _read_ticker_fixture(_FIXTURES / fixture_file)
+
+    recon_norm = {_strip_dot(t) for t in reconstructed}
+    truth_norm = {_strip_dot(t) for t in truth}
+    diff = recon_norm.symmetric_difference(truth_norm)
+
+    assert len(diff) <= 1, (
+        f"[{check_date}] symmetric_difference={len(diff)}: "
+        f"only-in-reconstructed={sorted(recon_norm - truth_norm)}, "
+        f"only-in-truth={sorted(truth_norm - recon_norm)}"
+    )
 
 
 # --- Fixtures local to this test module --------------------------------------
@@ -175,6 +274,61 @@ def test_build_panel_raises_on_empty_loader_output(
 
     with pytest.raises(RuntimeError, match="0 rows"):
         build_panel(cfg, tickers=["AAPL"], sleep_between_calls=0)
+
+
+# --- build_panel_for_date — Day 10 -------------------------------------------
+
+
+def test_build_panel_for_date_uses_membership_for_tickers(
+    cfg: AegisConfig,
+    stock_daily_panel: pd.DataFrame,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """build_panel_for_date(cfg, sample_date, membership) restricts to active_on(sample_date).
+
+    Constructs a tiny membership frame with two tickers — one currently a
+    member, one removed before sample_date — and asserts the loader is
+    called with exactly the active ticker.
+    """
+    sample_date = date(2020, 6, 15)
+    membership = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB"],
+            "name": ["Active Co", "Removed Co"],
+            "wiki_sector": [None, None],
+            "wiki_sub_industry": [None, None],
+            "date_added": [pd.Timestamp("2010-01-01"), pd.Timestamp("2010-01-01")],
+            "date_removed": [pd.NaT, pd.Timestamp("2019-12-31")],
+            "cik_code": [pd.NA, pd.NA],
+        }
+    )
+
+    received_tickers: list[str] = []
+
+    def _capture_loader(*, tickers: list[str], **kwargs: object) -> pd.DataFrame:
+        received_tickers.extend(tickers)
+        return stock_daily_panel.copy()
+
+    monkeypatch.setattr(panel_module, "load_polygon_daily", _capture_loader)
+
+    # Redirect output dir to avoid polluting data/processed/
+    test_cfg = cfg.model_copy(
+        update={
+            "data": cfg.data.model_copy(
+                update={"paths": cfg.data.paths.model_copy(update={"processed": tmp_path})}
+            )
+        }
+    )
+
+    out_path = panel_module.build_panel_for_date(
+        test_cfg, sample_date, membership, sleep_between_calls=0
+    )
+    assert out_path.exists()
+    assert received_tickers == ["AAA"], (
+        f"build_panel_for_date should pass only active_on(sample_date) tickers "
+        f"to the loader; got {received_tickers}"
+    )
 
 
 # --- hashing utility sanity checks ------------------------------------------

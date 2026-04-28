@@ -22,6 +22,7 @@ Data flow:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -107,6 +108,36 @@ def build_panel(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     panel.to_parquet(out_path, index=False)
     return out_path
+
+
+def build_panel_for_date(
+    cfg: AegisConfig,
+    sample_date: date,
+    membership_df: pd.DataFrame,
+    *,
+    sleep_between_calls: float = 12.5,
+) -> Path:
+    """Build a daily panel restricted to S&P 500 members on ``sample_date``.
+
+    Composes Day 8's index-membership gate (:func:`aegis.data.index_membership.active_on`)
+    into the panel pipeline. The §7 sample filters (common-share /
+    exchange / price ≥ $5 / ≥252-day history) compose downstream inside
+    ``build_universe_flags``.
+
+    The full :data:`AegisConfig.data.date_range` is pulled from Polygon
+    (the eventual panel covers many trading days even though the
+    membership gate is anchored at one ``sample_date``). Day 13's full-
+    universe scale test consumes this primitive directly.
+    """
+    from aegis.data.index_membership import active_on
+
+    tickers = sorted(active_on(sample_date, membership_df))
+    if not tickers:
+        raise RuntimeError(
+            f"active_on({sample_date}) returned 0 tickers — check the membership "
+            f"CSV; the index reconstruction window may not cover this date"
+        )
+    return build_panel(cfg, tickers=tickers, sleep_between_calls=sleep_between_calls)
 
 
 def _finalize_panel(raw: pd.DataFrame, cfg: AegisConfig) -> pd.DataFrame:
