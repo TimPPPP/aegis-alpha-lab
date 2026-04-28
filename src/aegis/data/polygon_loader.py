@@ -128,21 +128,42 @@ def load_polygon_daily(
     conn = client if client is not None else _make_client(api_key)
 
     # Pull ticker metadata once per ticker (single call each), then the
-    # per-ticker adjusted aggs over the window.
+    # per-ticker adjusted aggs over the window. Tolerant per-ticker error
+    # handling: a NOT_FOUND on either call (delisted ticker, renamed ticker,
+    # Polygon coverage gap) skips that ticker with a logged warning so the
+    # other ~495 tickers in a Day 13 widened-universe run still produce a
+    # panel. The locked Week 2 plan accepts "~500 tickers" as the live-run
+    # acceptance target, not "exactly 500".
     frames: list[pd.DataFrame] = []
+    skipped: list[tuple[str, str]] = []
     for i, ticker in enumerate(tickers):
         if i > 0 and sleep_between_calls > 0:
             time.sleep(sleep_between_calls)
-        meta = _fetch_ticker_meta(conn, ticker)
+        try:
+            meta = _fetch_ticker_meta(conn, ticker)
+        except Exception as e:
+            skipped.append((ticker, f"meta: {type(e).__name__}: {str(e)[:80]}"))
+            continue
 
         if sleep_between_calls > 0:
             time.sleep(sleep_between_calls)
-        aggs = _fetch_daily_bars(conn, ticker, start, end, sleep_between_calls)
+        try:
+            aggs = _fetch_daily_bars(conn, ticker, start, end, sleep_between_calls)
+        except Exception as e:
+            skipped.append((ticker, f"aggs: {type(e).__name__}: {str(e)[:80]}"))
+            continue
 
         if aggs.empty:
             continue
 
         frames.append(_assemble_ticker_frame(aggs, meta))
+
+    if skipped:
+        print(
+            f"  skipped {len(skipped)} tickers (Polygon errors): "
+            f"{', '.join(t for t, _ in skipped[:10])}"
+            f"{' …' if len(skipped) > 10 else ''}"
+        )
 
     if not frames:
         return _empty_frame()
