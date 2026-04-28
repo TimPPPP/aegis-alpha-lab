@@ -24,9 +24,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from aegis.ledger.models import (
@@ -35,6 +36,15 @@ from aegis.ledger.models import (
     CandidateType,
 )
 from aegis.ledger.schema import Artifact, Base, Candidate, Experiment
+
+
+def _enable_sqlite_foreign_keys(dbapi_connection: Any, _connection_record: Any) -> None:
+    """Enable SQLite FK enforcement for each new DB-API connection."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
 
 
 @contextmanager
@@ -54,6 +64,7 @@ def open_ledger(path: Path) -> Iterator[Session]:
         url = f"sqlite:///{path}"
 
     engine = create_engine(url)
+    event.listen(engine, "connect", _enable_sqlite_foreign_keys)
     Base.metadata.create_all(engine)
 
     session = Session(engine)

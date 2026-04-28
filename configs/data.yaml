@@ -5,11 +5,13 @@
 #   data.yaml.date_range       → current working slice for iteration.
 #                                Narrower during Weeks 1-4; equals universe range
 #                                once the pipeline is stable.
-# Narrowing here does NOT re-open the locked sub-holdout (§5.2).
+# This Week 1/2 slice is for engineering smoke tests only. It is not an
+# evaluation sample and cannot be used as evidence for alpha, even though it
+# overlaps the locked sub-holdout dates.
 
 paths:
-  raw:       ./data/raw          # immutable WRDS pulls
-  interim:   ./data/interim      # post-adjustment, pre-panel
+  raw:       ./data/raw          # immutable provider pulls
+  interim:   ./data/interim      # post-normalization, pre-panel
   processed: ./data/processed    # final Parquet panel + factor outputs
   reference: ./data/reference    # curated reference tables (sp500_membership.csv, ticker_aliases.csv)
 

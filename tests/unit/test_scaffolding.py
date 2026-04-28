@@ -6,6 +6,7 @@ research code. They intentionally do not touch modules A-F.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import aegis
@@ -81,7 +82,7 @@ def test_content_hash_invariant_to_data_paths() -> None:
 
 
 def test_content_hash_invariant_to_data_snapshot_filenames() -> None:
-    """Everything under ``data`` is excluded — including snapshot filenames.
+    """Artifact filenames are excluded from research identity.
 
     Data integrity comes from ``data_snapshot_id`` (SHA-256 of the actual
     Parquet bytes) attached to each artifact, not from the filename the
@@ -96,10 +97,20 @@ def test_content_hash_invariant_to_data_snapshot_filenames() -> None:
     assert base.content_hash() == alt.content_hash()
 
 
+def test_content_hash_changes_when_data_sample_window_changes() -> None:
+    """The sampled research window is part of replay identity."""
+    base = cfg.load_all()
+    changed_range = base.data.date_range.model_copy(update={"start": date(2024, 1, 2)})
+    changed_data = base.data.model_copy(update={"date_range": changed_range})
+    changed = base.model_copy(update={"data": changed_data})
+
+    assert base.content_hash() != changed.content_hash()
+
+
 def test_content_hash_changes_when_research_identity_changes() -> None:
     """The other direction: touching gates/risk/universe/portfolio/costs/factors
-    MUST change the hash. Excluding data cannot weaken the gate against silent
-    threshold drift — that's the whole point of pre-commitment (spec §5.2).
+    MUST change the hash. The gate against silent threshold drift is the
+    point of pre-commitment (spec sec. 5.2).
     """
     base = cfg.load_all()
 

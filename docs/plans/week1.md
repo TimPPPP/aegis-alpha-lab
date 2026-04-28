@@ -58,11 +58,11 @@ Value composite (B/P + E/P + S/P + CF/P) is **not** the first factor — it need
 
 Polygon free tier, small slice for fast iteration:
 
-- **Dates:** 2020-01-01 → 2022-12-31.
-- **Universe:** a hardcoded list of ~200 liquid large caps from 2020-2022 (e.g., S&P 500 constituents as of 2019-12-31). **Note:** this is NOT survivorship-bias-free — delisted tickers are silently absent. Week 1 outputs must carry a loud "NOT PRODUCTION GRADE" caveat; the delisted-ticker tracker is Week 2.
+- **Dates:** 2024-06-01 → 2026-03-31. This is an engineering smoke window, not an evaluation sample and not evidence for alpha.
+- **Universe:** 8 hardcoded liquid blue-chip survivors: AAPL, MSFT, GOOGL, AMZN, NVDA, META, JPM, JNJ. **Note:** this is NOT survivorship-bias-free — delisted tickers are silently absent. Week 1 outputs must carry a loud "NOT PRODUCTION GRADE" caveat; the delisted-ticker tracker is Week 2.
 - **Output:** `data/processed/daily_panel_week1.parquet` + `data/processed/factor_mom_12_1_week1.parquet` + `data/ledger.sqlite`.
 
-Full 2000–2025 × ~3,000 names is Week 2+ territory after the pipeline is debugged and the $29/mo Polygon tier is active.
+Full 2000–2025 × ~3,000 names is later-project territory after the pipeline is debugged and the Polygon paid tier is active.
 
 ## Schemas (already landed in Day 1 + pivot)
 
@@ -99,7 +99,7 @@ Location: [`src/aegis/features/base.py`](../../src/aegis/features/base.py)
 
 ```
 date, ticker, factor_name, raw_value, winsorized_value, zscore_value,
-valid_flag, feature_snapshot_id
+valid_flag, tradable_flag, feature_snapshot_id
 ```
 
 ### `ResearchRecord` + per-table Pydantic shapes
@@ -115,7 +115,7 @@ Landed during Day 1 and the pivot. All four schemas above exist; `configs/data.y
 
 ### Day 2 — Polygon loader + universe filter ✓ DONE
 
-- [`src/aegis/data/polygon_loader.py`](../../src/aegis/data/polygon_loader.py) — `load_polygon_daily(tickers, start, end, client=None, api_key=None, sleep_between_calls=12.5)` with MIC→exchange map (`XNYS→NYSE`, `XASE→AMEX`, `XNAS→NASDAQ`), free-tier rate-limit sleep, and duplicate-row invariant.
+- [`src/aegis/data/polygon_loader.py`](../../src/aegis/data/polygon_loader.py) — `load_polygon_daily(tickers, start, end, client=None, api_key=None, sleep_between_calls=12.5, require_all_tickers=False)` with MIC→exchange map (`XNYS→NYSE`, `XASE→AMEX`, `XNAS→NASDAQ`), free-tier rate-limit sleep, duplicate-row invariant, and strict completeness mode for fixed smoke universes.
 - [`src/aegis/data/universe.py`](../../src/aegis/data/universe.py) — `build_universe_flags(panel, cfg)`: 4 vectorized rules (common_share, exchange, history, price), t-1 close discipline, deterministic `fail_reason` ordering.
 - [`tests/unit/test_universe.py`](../../tests/unit/test_universe.py) — 11 tests covering every rule, the $5.00/$5.01 spec boundary, t-1 lookahead discipline, rule-ordering invariant, Pydantic round-trip.
 - [`tests/integration/test_polygon_loader.py`](../../tests/integration/test_polygon_loader.py) — `@pytest.mark.polygon` smoke test auto-skipped until `POLYGON_API_KEY` is set.
@@ -141,14 +141,14 @@ Landed 2026-04-23. Artifacts in tree:
 
 Landed 2026-04-23. Artifacts in tree:
 
-- [`src/aegis/ledger/store.py`](../../src/aegis/ledger/store.py) — append-only write API: `open_ledger(path)` (context manager), `register_experiment`, `register_candidate`, `register_artifact`. All return `uuid.UUID`. No `update_*` / `delete_*` exports — append-only is enforced at the interface level (tested).
+- [`src/aegis/ledger/store.py`](../../src/aegis/ledger/store.py) — append-only write API: `open_ledger(path)` (context manager), `register_experiment`, `register_candidate`, `register_artifact`. All return `uuid.UUID`. No `update_*` / `delete_*` exports — append-only is enforced at the interface level (tested). SQLite foreign keys are enabled on every connection.
 - [`src/aegis/ledger/replay.py`](../../src/aegis/ledger/replay.py) — `replay(candidate_id)` stub that raises `NotImplementedError`; real engine is Week 2.
-- [`src/aegis/utils/git.py`](../../src/aegis/utils/git.py) — `current_git_sha()`: `$AEGIS_GIT_SHA` env var first (Docker-bake-friendly), falls back to `git rev-parse HEAD`, raises `GitShaUnavailableError` if neither works.
+- [`src/aegis/utils/git.py`](../../src/aegis/utils/git.py) — `current_git_sha()`: `$AEGIS_GIT_SHA` env var first (Docker-bake-friendly), falls back to `git rev-parse HEAD`, raises `GitShaUnavailableError` if neither works. Ledger-writing runs require a clean worktree unless `AEGIS_ALLOW_DIRTY_GIT=1` is explicitly set.
 - [`src/aegis/ledger/__init__.py`](../../src/aegis/ledger/__init__.py) — re-exports the four public functions.
 - [`src/aegis/cli.py`](../../src/aegis/cli.py) — `aegis ledger init [--path PATH]` wired; `aegis ledger replay <candidate_id>` wired to the stub.
 - [`tests/unit/test_ledger.py`](../../tests/unit/test_ledger.py) — 11 real tests (table creation, round-trip, FK integrity, 1-to-many, append-only interface, git SHA priority order) + the preserved Module B `xfail` stub.
 
-**Live smoke (2026-04-23):** `uv run aegis ledger init` produced `data/ledger.sqlite` (77 KB) containing the four tables. `content_hash()` stayed at `093a33a5…` — ledger machinery doesn't touch research identity.
+**Live smoke (2026-04-23):** `uv run aegis ledger init` produced `data/ledger.sqlite` (77 KB) containing the four tables. `content_hash()` is stable across path changes but changes when research identity changes, including the data sample window.
 
 **Ledger path resolution:** `$AEGIS_LEDGER_PATH` env var first, fallback to `./data/ledger.sqlite`. Not added to `AegisConfig` — it's operational layout, not research identity (same argument as excluding `data.paths` from `content_hash`).
 
@@ -157,9 +157,9 @@ Landed 2026-04-23. Artifacts in tree:
 Landed 2026-04-23. Artifacts in tree:
 
 - [`src/aegis/features/operators.py`](../../src/aegis/features/operators.py) — `winsorize_cross_section(df, value_col, pct=(0.01, 0.99))` and `zscore_cross_section(df, value_col, ddof=0)`. Both per-date via `groupby`, lookahead-safe by construction. Zero variance → NaN (not inf).
-- [`src/aegis/features/momentum.py`](../../src/aegis/features/momentum.py) — `Momentum12m1m(Factor)`: `name="mom_12_1"`, `formula="log(P[t-21] / P[t-252])"`, `lookback_days=252`. `compute(panel)` returns a `FactorObservation`-shaped frame with raw + winsorized + zscore + `feature_snapshot_id`.
+- [`src/aegis/features/momentum.py`](../../src/aegis/features/momentum.py) — `Momentum12m1m(Factor)`: `name="mom_12_1"`, `formula="log(P[t-21] / P[t-252])"`, `lookback_days=252`. `compute(panel)` returns a `FactorObservation`-shaped frame with raw + winsorized + zscore + `valid_flag`, `tradable_flag`, and `feature_snapshot_id`.
 - [`tests/unit/test_operators.py`](../../tests/unit/test_operators.py) — 13 tests: per-date clip, NaN passthrough, bounds validation, zscore mean/std/rank identities, degenerate-distribution NaN handling.
-- [`tests/unit/test_momentum.py`](../../tests/unit/test_momentum.py) — 14 tests: hand-computed precision at 1e-12, 21-day skip proof, valid_flag-matches-finite-triple invariant, per-date zscore mean ≈ 0, σ-algebra measurability via truncation stability, snapshot_id stability.
+- [`tests/unit/test_momentum.py`](../../tests/unit/test_momentum.py) — tests for hand-computed precision at 1e-12, 21-day skip proof, valid_flag-matches-finite-triple invariant, tradable_flag eligibility discipline, per-date zscore mean ≈ 0, σ-algebra measurability via truncation stability, snapshot_id stability.
 
 **Transform pipeline (per spec §8 intro):**
   1. raw = log(adj_close[t-21]) − log(adj_close[t-252])  (lag-only, σ-algebra safe)
@@ -169,7 +169,7 @@ Landed 2026-04-23. Artifacts in tree:
 The 1%/99% percentile choice matches spec §8 ("Cross-sectional z-score with 1%/99% winsorization"). Barra-lite exposures (Module D, weeks 6-8) use ±3σ per §4.2 — different code path, different rule, both justified by spec.
 
 **Live compute (2026-04-23):** Ran `Momentum12m1m().compute(panel)` on the real Day 3 Polygon panel:
-- 3,664 output rows / 1,648 valid (45%, matches Day 3 eligibility exactly)
+- 3,664 output rows / 1,648 finite and tradable rows (45%, matches Day 3 eligibility exactly)
 - Per-date zscore means: 0.000000 across all dates
 - AAPL 2026-03-31 raw ≈ +0.195 (19.5% log return over the 12-to-1-month window, plausible)
 - Snapshot hash stable across re-runs
@@ -183,16 +183,16 @@ Landed 2026-04-23. Artifacts in tree:
 - [`src/aegis/backtest/week1.py`](../../src/aegis/backtest/week1.py) — `run_week1_slice(cfg, ledger_path, sleep_between_calls)` returns a `Week1SliceResult` frozen dataclass. Composes Day 3 (`build_panel`) + Day 5 (`Momentum12m1m.compute`) + Day 4 (`open_ledger` / `register_*`) + hashing/git helpers into one call.
 - [`src/aegis/backtest/__init__.py`](../../src/aegis/backtest/__init__.py) — re-exports `Week1SliceResult`, `run_week1_slice`, `EXPERIMENT_NAME`.
 - [`src/aegis/cli.py`](../../src/aegis/cli.py) — `aegis backtest week1 [--fast] [--ledger-path PATH]` wired. Existing `aegis backtest run` stub retained for the Week 19 generalized runner.
-- [`tests/unit/test_week1_pipeline.py`](../../tests/unit/test_week1_pipeline.py) — 6 Polygon-free tests using the `stock_daily_panel` fixture + on-disk SQLite. Monkey-patches `build_panel` and `current_git_sha` for determinism.
+- [`tests/unit/test_week1_pipeline.py`](../../tests/unit/test_week1_pipeline.py) — Polygon-free tests using the `stock_daily_panel` fixture + on-disk SQLite. Monkey-patches `build_panel` and `current_git_sha` for determinism and asserts Week 1 uses strict ticker completeness.
 
 **Live end-to-end (2026-04-23):** `uv run aegis backtest week1` produced in ~5 min on free tier:
 - `data/processed/daily_panel_week1.parquet` (3,664 rows)
-- `data/processed/factor_mom_12_1_week1.parquet` (1,648 valid / 3,664 rows)
+- `data/processed/factor_mom_12_1_week1.parquet` (1,648 finite and tradable / 3,664 rows)
 - Ledger rows: 1 experiment (`46bbc113…`), 1 candidate (`79431a46…`, status `"computed"`), 2 artifacts (panel + factor)
 
 **Key invariants verified:**
 - `data_snapshot_id = 3de377ce…` — identical to Day 3's live run → Polygon returned identical bars → pipeline is idempotent in data identity.
-- `config_hash = 093a33a5…` — unchanged from scaffolding → research identity stable.
+- `config_hash` — stable for unchanged research identity and path-invariant, but intentionally changes if the sample window changes.
 - `git_sha = b28683ccbcef…` — captured from `git rev-parse HEAD`.
 - `panel.checksum = 45a724d3…`, `factor.checksum = fa6bc723…` — artifact bytes on disk match what the ledger recorded (via `sha256_file`).
 - Re-running appends new experiment/candidate rows with new UUIDs but same `config_hash` — append-only discipline intact.
@@ -218,7 +218,7 @@ Landed 2026-04-23. Artifacts in tree:
 - [`notebooks/week1_smoke_test.ipynb`](../../notebooks/week1_smoke_test.ipynb) — 13 cells (6 code + 7 markdown) that read the on-disk Parquets and ledger and produce: ledger summary, eligibility-over-time plot, final-date factor cross-section with top/bottom tickers, AAPL 12-1 momentum time series, per-date zscore-mean sanity check. nbstripout handles output sanitation on commit.
 - [`README.md`](../../README.md) — rewrote Quickstart around Polygon, added a dedicated "Run the Week 1 vertical slice" section with exact commands, and updated the V1 module build-order table with status markers (🟢 done / 🟡 slice / ⚪ not started).
 
-**Smoke verification:** ran the notebook's code paths inline against the real `data/processed/*.parquet` + `data/ledger.sqlite` — 3,664 panel rows, 1,648 valid factor rows, ledger has 1/1/2 (exp/cand/art), per-date zscore mean-max = 2.22e-16, all aligned with Day 6 live output.
+**Smoke verification:** ran the notebook's code paths inline against the real `data/processed/*.parquet` + `data/ledger.sqlite` — 3,664 panel rows, 1,648 finite/tradable factor rows, ledger has 1/1/2 (exp/cand/art), per-date zscore mean-max = 2.22e-16, all aligned with Day 6 live output.
 
 **Week 1 report:** [`docs/reports/week1.md`](../reports/week1.md) — top-line numbers, day-by-day summary, major pivots (WRDS → Polygon, content_hash platform invariance), live pipeline output, what Week 1 demonstrably does NOT claim, readiness for Week 2.
 
@@ -251,7 +251,7 @@ Do **not** touch:
 - Regime HMM, Ledoit-Wolf shrinkage (V2).
 - Qlib adapter (V2, per spec §15.6 — explicitly deferred).
 - LLM anything (V2).
-- The locked 2024–2025 sub-holdout (Week 20 only, opened once, ever).
+- The locked 2024–2025 sub-holdout for evidence generation. Week 1's 2024–2026 slice is plumbing smoke only and must not be used to claim performance.
 - **Delisted-ticker / survivorship tracker** — Week 2.
 - **Historical S&P 500 membership** — Week 2.
 
@@ -259,15 +259,15 @@ Do **not** touch:
 
 By end-of-week:
 
-- [ ] `uv run aegis backtest week1` runs end-to-end on a ~200-ticker × 2020-2022 slice.
-- [ ] `data/processed/daily_panel_week1.parquet` exists, ~200k rows.
-- [ ] `data/processed/factor_mom_12_1_week1.parquet` exists with `raw_value`, `winsorized_value`, `zscore_value`.
+- [ ] `uv run aegis backtest week1` runs end-to-end on the 8-ticker × 2024-2026 engineering smoke slice.
+- [ ] `data/processed/daily_panel_week1.parquet` exists, 3,664 rows on the current Week 1 window.
+- [ ] `data/processed/factor_mom_12_1_week1.parquet` exists with `raw_value`, `winsorized_value`, `zscore_value`, and `tradable_flag`.
 - [ ] `data/ledger.sqlite` has one experiment row, one candidate row (status `computed`), two artifact rows.
 - [ ] Re-running with unchanged code + config + Polygon snapshot produces identical `config_hash` and `data_snapshot_id`.
 - [ ] `tests/unit/test_schema.py`, `test_universe.py`, `test_panel.py`, `test_ledger.py`, `test_momentum.py` all green (not xfail).
 - [ ] `notebooks/week1_smoke_test.ipynb` renders five plots; nbstripout removes outputs on commit.
 - [ ] README Quickstart updated with Polygon setup instructions.
 - [ ] Ruff + mypy + pytest (non-polygon) all clean.
-- [ ] `content_hash()` unchanged (research identity stable across the pivot).
+- [ ] `content_hash()` is stable across path changes and changes when research identity changes, including the data sample window.
 
-If those ten boxes check, Week 1 is a success — and Week 2 (widen to full 2000–2025 × 3,000 names, add Polygon fundamentals, build the delisted-ticker tracker, begin the feature library) starts from a working spine.
+If those ten boxes check, Week 1 is a success — and Week 2 starts from a working spine that still carries a clear "not production grade" caveat until historical membership and delisting-aware tradability are in place.

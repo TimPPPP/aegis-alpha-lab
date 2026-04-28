@@ -209,7 +209,7 @@ def test_full_slice_uses_date_aware_universe(
         )
 
     monkeypatch.setattr(panel_module, "load_polygon_daily", _capture)
-    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda: FAKE_GIT_SHA)
+    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda **_: FAKE_GIT_SHA)
 
     ledger_path = tmp_path / "ledger.sqlite"
 
@@ -246,7 +246,7 @@ def test_full_slice_ledger_records_universe_date(
             end=widened_cfg.data.date_range.end,
         ),
     )
-    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda: FAKE_GIT_SHA)
+    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda **_: FAKE_GIT_SHA)
 
     ledger_path = tmp_path / "ledger.sqlite"
     run_full_slice(widened_cfg, ledger_path, date(2024, 1, 5), sleep_between_calls=0)
@@ -330,7 +330,7 @@ def test_full_slice_synthetic_500_ticker_fixture_is_sensible(
             end=widened_cfg.data.date_range.end,
         ),
     )
-    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda: FAKE_GIT_SHA)
+    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda **_: FAKE_GIT_SHA)
 
     ledger_path = tmp_path / "ledger.sqlite"
     sample_date = date(2025, 6, 15)
@@ -353,10 +353,10 @@ def test_full_slice_synthetic_500_ticker_fixture_is_sensible(
     assert "REN" not in set(panel["ticker"])
     assert "FUT" not in set(panel["ticker"])
 
-    # Gate 3: factor shape (rows, 8) — Day 5's FactorObservation columns
+    # Gate 3: factor shape (rows, 9) - FactorObservation columns plus tradability
     factor = pd.read_parquet(result.factor_path)
-    assert factor.shape == (result.panel_rows, 8), (
-        f"factor shape {factor.shape} does not match (rows, 8)"
+    assert factor.shape == (result.panel_rows, 9), (
+        f"factor shape {factor.shape} does not match (rows, 9)"
     )
 
     # Gate 4: wall time < 30s on a dev laptop

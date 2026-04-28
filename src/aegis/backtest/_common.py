@@ -56,6 +56,7 @@ class SliceResult:
     git_sha: str
     panel_rows: int
     factor_valid_rows: int
+    factor_tradable_rows: int
 
 
 def _run_factor_slice(
@@ -68,6 +69,7 @@ def _run_factor_slice(
     panel_filename: str | None = None,
     factor_filename: str | None = None,
     metadata_as_of: date | None = None,
+    require_all_tickers: bool = False,
 ) -> SliceResult:
     """Build panel for ``tickers``, compute mom_12_1, write artifacts, ledger.
 
@@ -91,6 +93,7 @@ def _run_factor_slice(
         sleep_between_calls=sleep_between_calls,
         panel_filename=panel_basename,
         metadata_as_of=metadata_as_of,
+        require_all_tickers=require_all_tickers,
     )
     panel = pd.read_parquet(panel_path)
     data_snapshot_id = str(panel["data_snapshot_id"].iloc[0])
@@ -100,6 +103,7 @@ def _run_factor_slice(
     factor = Momentum12m1m()
     factor_out = factor.compute(panel)
     factor_valid_rows = int(factor_out["valid_flag"].sum())
+    factor_tradable_rows = int(factor_out["tradable_flag"].sum())
 
     # 3. Write factor Parquet alongside the panel.
     factor_path = cfg.data.paths.processed / factor_basename
@@ -112,7 +116,7 @@ def _run_factor_slice(
 
     # 5. Register provenance in the ledger (Day 4).
     config_hash = cfg.content_hash()
-    git_sha = current_git_sha()
+    git_sha = current_git_sha(require_clean=True)
 
     with open_ledger(ledger_path) as session:
         experiment_id = register_experiment(
@@ -158,6 +162,7 @@ def _run_factor_slice(
         git_sha=git_sha,
         panel_rows=panel_rows,
         factor_valid_rows=factor_valid_rows,
+        factor_tradable_rows=factor_tradable_rows,
     )
 
 

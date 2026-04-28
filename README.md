@@ -33,7 +33,7 @@ uv sync
 cp .env.example .env
 # edit .env: POLYGON_API_KEY=<your key from polygon.io/dashboard/api-keys>
 
-# 3. Quality gates — expect 103 passed, 6 xfail (Modules A–F acceptance stubs)
+# 3. Quality gates
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run mypy src
@@ -53,9 +53,13 @@ uv run aegis ledger init
 uv run aegis backtest week1
 ```
 
+This Week 1 run is an engineering smoke test only. It uses 8 survivor blue chips
+over the current Polygon dev window and must not be treated as performance
+evidence.
+
 Produces:
 - `data/processed/daily_panel_week1.parquet` — Module A panel (8 tickers × ~458 trading days)
-- `data/processed/factor_mom_12_1_week1.parquet` — `mom_12_1` factor output
+- `data/processed/factor_mom_12_1_week1.parquet` — `mom_12_1` factor output, including `tradable_flag`
 - Three new rows in `data/ledger.sqlite` (1 experiment, 1 candidate, 2 artifacts)
 
 For the interactive smoke notebook, install the optional extras and open it:

@@ -16,9 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
+from aegis.backtest import _common as backtest_common_module
 from aegis.backtest.week1 import Week1SliceResult, run_week1_slice
-from aegis.config import AegisConfig
+from aegis.config import AegisConfig, load_all
+from aegis.data.panel import _finalize_panel
 from aegis.utils.hashing import sha256_file
 from tests.conftest import FAKE_GIT_SHA, ledger_snapshot
 
@@ -35,6 +38,46 @@ def test_run_week1_slice_writes_both_parquets(
     assert result.factor_path.exists()
     assert result.panel_path.name == cfg.data.snapshot.panel_filename
     assert result.factor_path.name == cfg.data.snapshot.factor_filename
+
+
+def test_run_week1_slice_requires_all_fixed_tickers(
+    stock_daily_panel: pd.DataFrame,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 8-name Week 1 smoke universe must fail loudly on missing tickers."""
+    base_cfg = load_all()
+    cfg = base_cfg.model_copy(
+        update={
+            "data": base_cfg.data.model_copy(
+                update={
+                    "paths": base_cfg.data.paths.model_copy(update={"processed": tmp_path}),
+                }
+            )
+        }
+    )
+    panel_path = tmp_path / cfg.data.snapshot.panel_filename
+    _finalize_panel(stock_daily_panel, cfg).to_parquet(panel_path, index=False)
+    captured: dict[str, bool] = {}
+
+    def _fake_build_panel(
+        cfg: AegisConfig,
+        *,
+        tickers=None,
+        sleep_between_calls: float = 0.0,
+        panel_filename: str | None = None,
+        metadata_as_of=None,
+        require_all_tickers: bool = False,
+    ) -> Path:
+        captured["require_all_tickers"] = require_all_tickers
+        return panel_path
+
+    monkeypatch.setattr(backtest_common_module, "build_panel", _fake_build_panel)
+    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda **_: FAKE_GIT_SHA)
+
+    run_week1_slice(cfg, tmp_path / "ledger.sqlite", sleep_between_calls=0)
+
+    assert captured["require_all_tickers"] is True
 
 
 def test_run_week1_slice_registers_one_experiment_one_candidate_two_artifacts(

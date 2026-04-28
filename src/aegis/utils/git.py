@@ -20,19 +20,28 @@ import os
 import subprocess
 from pathlib import Path
 
+_ALLOW_DIRTY_ENV = "AEGIS_ALLOW_DIRTY_GIT"
+
 
 class GitShaUnavailableError(RuntimeError):
     """Neither ``AEGIS_GIT_SHA`` env var nor ``git rev-parse`` worked."""
 
 
-def current_git_sha(repo_path: Path | None = None) -> str:
+class DirtyGitWorktreeError(RuntimeError):
+    """The worktree has uncommitted or untracked changes."""
+
+
+def current_git_sha(repo_path: Path | None = None, *, require_clean: bool = False) -> str:
     """Return the current git SHA (full 40-char hex).
 
     Args:
         repo_path: Directory to run ``git rev-parse`` in. Defaults to CWD.
+        require_clean: If True, fail when the worktree has uncommitted or
+            untracked changes unless ``AEGIS_ALLOW_DIRTY_GIT=1`` is set.
 
     Raises:
         GitShaUnavailableError: if neither the env var nor git is reachable.
+        DirtyGitWorktreeError: if ``require_clean=True`` and the worktree is dirty.
     """
     if (sha := os.environ.get("AEGIS_GIT_SHA")) and len(sha) >= 7:
         return sha
@@ -57,7 +66,37 @@ def current_git_sha(repo_path: Path | None = None) -> str:
     sha = result.stdout.strip()
     if not sha or len(sha) < 7:
         raise GitShaUnavailableError(f"git rev-parse HEAD returned unexpected output: {sha!r}")
+
+    if require_clean and not _dirty_git_override_enabled():
+        _assert_worktree_clean(cwd)
     return sha
 
 
-__all__ = ["GitShaUnavailableError", "current_git_sha"]
+def _dirty_git_override_enabled() -> bool:
+    return os.environ.get(_ALLOW_DIRTY_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _assert_worktree_clean(cwd: str | None) -> None:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        raise GitShaUnavailableError(
+            "Could not determine git worktree status. Ledger rows require clean "
+            "code provenance unless AEGIS_ALLOW_DIRTY_GIT=1 is set."
+        ) from e
+
+    if result.stdout.strip():
+        raise DirtyGitWorktreeError(
+            "The git worktree has uncommitted or untracked changes. Commit them before writing "
+            "ledger rows, or set AEGIS_ALLOW_DIRTY_GIT=1 for an explicitly dirty run."
+        )
+
+
+__all__ = ["DirtyGitWorktreeError", "GitShaUnavailableError", "current_git_sha"]

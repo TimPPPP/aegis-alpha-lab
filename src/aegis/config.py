@@ -257,6 +257,7 @@ class FactorCatalog(_Frozen):
 _RESEARCH_IDENTITY_FIELDS: frozenset[str] = frozenset(
     {"gates", "risk", "universe", "portfolio", "costs", "factors"}
 )
+_DATA_RESEARCH_IDENTITY_FIELDS: frozenset[str] = frozenset({"date_range", "id_column", "calendar"})
 
 
 class AegisConfig(_Frozen):
@@ -271,20 +272,22 @@ class AegisConfig(_Frozen):
     def content_hash(self) -> str:
         """Platform-invariant SHA-256 of the research-identity subset.
 
-        Excludes :class:`DataConfig` because it holds ``pathlib.Path`` values
-        that serialize with platform-dependent separators (``data\\raw`` on
-        Windows vs ``data/raw`` on POSIX). Paths are deployment layout, not
-        research identity — moving Parquet from ``./data/`` to ``/mnt/shared/``
-        must not change a candidate's ledger fingerprint. Per-artifact integrity
-        of the actual data loaded is covered separately by ``data_snapshot_id``
-        (SHA-256 of the Parquet bytes), so no integrity is lost.
+        Includes the data sample definition (date range, id column, calendar)
+        because changing the sampled research window must create config drift.
+        Excludes data paths and artifact filenames because they are deployment
+        layout, not research identity.
 
         This is what makes spec-§6 Module B ("every promoted factor replays
         bit-identical from the ledger") achievable when ledger rows written
         on Windows are replayed by CI on Linux or by a collaborator on macOS.
         """
+        payload_obj = self.model_dump(mode="json", include=set(_RESEARCH_IDENTITY_FIELDS))
+        payload_obj["data"] = self.data.model_dump(
+            mode="json",
+            include=set(_DATA_RESEARCH_IDENTITY_FIELDS),
+        )
         payload = json.dumps(
-            self.model_dump(mode="json", include=set(_RESEARCH_IDENTITY_FIELDS)),
+            payload_obj,
             sort_keys=True,
             separators=(",", ":"),
             default=str,

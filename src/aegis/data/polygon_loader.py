@@ -20,7 +20,7 @@ Normalizations applied here:
     Literal. Unknown codes fall into "OTHER".
 
 Rate-limit handling: the free tier permits 5 calls/min. For N tickers we
-need N aggs calls + N ticker-details calls = 2N calls. The loader sleeps
+need 2N aggs calls + N ticker-details calls = 3N calls. The loader sleeps
 between calls to stay under the limit unless ``sleep_between_calls`` is set
 to 0 by a caller who knows they're on a paid tier.
 
@@ -103,6 +103,7 @@ def load_polygon_daily(
     api_key: str | None = None,
     sleep_between_calls: float = _DEFAULT_SLEEP_S,
     metadata_as_of: date | None = None,
+    require_all_tickers: bool = False,
 ) -> pd.DataFrame:
     """Pull daily bars for the given tickers over [start, end].
 
@@ -118,6 +119,9 @@ def load_polygon_daily(
         metadata_as_of: Optional date passed to Polygon ticker-details calls.
             Historical universe runs use this to avoid classifying a renamed
             or delisted symbol using today's ticker state.
+        require_all_tickers: If True, raise when any requested ticker is
+            skipped or returns no bars. Intended for small fixed universes
+            where silent shrinkage is a correctness bug.
 
     Returns:
         Long-format DataFrame with columns listed in :data:`OUTPUT_COLUMNS`.
@@ -158,9 +162,14 @@ def load_polygon_daily(
             continue
 
         if aggs.empty:
+            skipped.append((ticker, "aggs: no rows returned"))
             continue
 
         frames.append(_assemble_ticker_frame(aggs, meta))
+
+    if require_all_tickers and skipped:
+        dropped = ", ".join(f"{ticker} ({reason})" for ticker, reason in skipped)
+        raise RuntimeError(f"Polygon loader did not return all requested tickers: {dropped}")
 
     if skipped:
         print(

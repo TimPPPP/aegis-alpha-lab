@@ -114,6 +114,20 @@ def test_valid_flag_matches_finite_triple() -> None:
     assert (out["valid_flag"] == triple_finite).all()
 
 
+def test_tradable_flag_combines_valid_factor_and_panel_eligibility() -> None:
+    """Finite factor math is not enough; ineligible panel rows are not tradable."""
+    rng = np.random.default_rng(42)
+    panel = _multi_ticker_panel(n_tickers=3, n_days=300, rng=rng)
+    panel["eligible_flag"] = panel["ticker"] != "T001"
+
+    out = Momentum12m1m().compute(panel)
+    ineligible_valid = out[(out["ticker"] == "T001") & out["valid_flag"]]
+
+    assert not ineligible_valid.empty
+    assert not ineligible_valid["tradable_flag"].any()
+    assert out.loc[(out["ticker"] != "T001") & out["valid_flag"], "tradable_flag"].all()
+
+
 # --- Cross-sectional properties ---------------------------------------------
 def test_zscore_has_zero_mean_per_date_when_enough_tickers() -> None:
     """After day 252, per-date zscore mean should be ~0 (population std)."""
@@ -209,6 +223,7 @@ def test_output_row_validates_as_factor_observation() -> None:
         winsorized_value=float(row["winsorized_value"]),
         zscore_value=float(row["zscore_value"]),
         valid_flag=bool(row["valid_flag"]),
+        tradable_flag=bool(row["tradable_flag"]),
         feature_snapshot_id=str(row["feature_snapshot_id"]),
     )
 

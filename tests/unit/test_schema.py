@@ -152,6 +152,7 @@ def _good_obs(**overrides: object) -> FactorObservation:
         "winsorized_value": 0.120,
         "zscore_value": 0.45,
         "valid_flag": True,
+        "tradable_flag": True,
         "feature_snapshot_id": HASH,
     }
     base.update(overrides)
@@ -166,7 +167,13 @@ def test_factor_observation_accepts_valid() -> None:
 
 
 def test_factor_observation_accepts_invalid_with_nulls() -> None:
-    obs = _good_obs(raw_value=None, winsorized_value=None, zscore_value=None, valid_flag=False)
+    obs = _good_obs(
+        raw_value=None,
+        winsorized_value=None,
+        zscore_value=None,
+        valid_flag=False,
+        tradable_flag=False,
+    )
     assert obs.valid_flag is False
 
 
@@ -178,6 +185,11 @@ def test_factor_observation_rejects_valid_flag_with_null_value() -> None:
 def test_factor_observation_rejects_invalid_flag_with_all_values_present() -> None:
     with pytest.raises(ValidationError):
         _good_obs(valid_flag=False)
+
+
+def test_factor_observation_rejects_tradable_when_invalid() -> None:
+    with pytest.raises(ValidationError):
+        _good_obs(raw_value=None, valid_flag=False, tradable_flag=True)
 
 
 # --- Factor ABC --------------------------------------------------------------

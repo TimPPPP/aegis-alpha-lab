@@ -40,6 +40,9 @@ class FactorObservation(_FrozenRow):
 
     ``valid_flag`` is True iff all three values are finite. A False flag
     typically means insufficient lookback history at that date.
+    ``tradable_flag`` is a stricter pipeline-level signal availability flag:
+    it is True only when the factor math is valid and the panel row is
+    universe-eligible/tradable.
     """
 
     date: date
@@ -51,6 +54,7 @@ class FactorObservation(_FrozenRow):
     zscore_value: float | None = None
 
     valid_flag: bool
+    tradable_flag: bool | None = None
     feature_snapshot_id: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -63,6 +67,8 @@ class FactorObservation(_FrozenRow):
             )
         if (not self.valid_flag) and all_present_and_finite:
             raise ValueError("valid_flag=False but all three values are present and finite")
+        if self.tradable_flag and not self.valid_flag:
+            raise ValueError("tradable_flag=True but valid_flag=False")
         return self
 
 

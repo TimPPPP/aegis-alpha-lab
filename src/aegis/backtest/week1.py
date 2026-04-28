@@ -59,6 +59,7 @@ def run_week1_slice(
         tickers=WEEK1_TICKERS,
         experiment_name=EXPERIMENT_NAME,
         sleep_between_calls=sleep_between_calls,
+        require_all_tickers=True,
     )
 
 

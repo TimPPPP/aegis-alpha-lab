@@ -273,7 +273,8 @@ def backtest_week1(
     console.print(f"  panel            {result.panel_path}  [dim]{result.panel_rows} rows[/]")
     console.print(
         f"  factor           {result.factor_path}  "
-        f"[dim]{result.factor_valid_rows} valid / {result.panel_rows}[/]"
+        f"[dim]{result.factor_tradable_rows} tradable / "
+        f"{result.factor_valid_rows} finite / {result.panel_rows}[/]"
     )
     console.print(f"  config_hash      {result.config_hash[:16]}…")
     console.print(f"  git_sha          {result.git_sha[:16]}")
@@ -327,7 +328,8 @@ def backtest_full(
     console.print(f"  panel            {result.panel_path}  [dim]{result.panel_rows} rows[/]")
     console.print(
         f"  factor           {result.factor_path}  "
-        f"[dim]{result.factor_valid_rows} valid / {result.panel_rows}[/]"
+        f"[dim]{result.factor_tradable_rows} tradable / "
+        f"{result.factor_valid_rows} finite / {result.panel_rows}[/]"
     )
     console.print(f"  config_hash      {result.config_hash[:16]}…")
     console.print(f"  git_sha          {result.git_sha[:16]}")

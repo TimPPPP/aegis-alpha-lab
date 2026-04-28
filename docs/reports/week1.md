@@ -11,7 +11,7 @@
 | Quality gates | ruff ✓ · ruff-format ✓ · mypy strict (26 files) ✓ |
 | Unit tests | 103 passed, 6 xfail, 0 failed |
 | Source-tree size | 26 `.py` files in `src/aegis/`, ~39 files incl. tests and configs |
-| `content_hash()` | `093a33a5e150578cb3b42b63095254ce7d35d58209cf36b58e49db6d41a7b3d8` — unchanged from scaffolding through Day 7 |
+| `content_hash()` | Current hardened config hash: `b8f31b996bcb4e655f4195590be006607884b89106cc73542de0f255e408e6bc`; data paths remain excluded, but the data sample window is now included |
 | `data_snapshot_id` | `3de377ce555877f7…` — same across Day 3 and Day 6 runs (idempotent Polygon pull) |
 | Live run wall time | ~5 minutes end-to-end on Polygon free tier |
 
@@ -35,12 +35,12 @@ Rice's Jones School denied the WRDS application. Spec §7 had WRDS as primary an
 - Dropped `permno: int`, `share_code: int` — added `ticker: str`, `ticker_type: Literal[...]`.
 - Replaced `wrds_loader.py` → `polygon_loader.py`; rewrote per-rule universe checks.
 - Rebuilt the `stock_daily_panel` fixture with Polygon-flavored tickers (`T_PASS_NYSE`, `T_FAIL_SHARE`, …).
-- `content_hash()` stayed at `093a33a5…` — schema change didn't touch research-identity fields.
+- `content_hash()` stayed stable through the original Week 1 pivot. It was later hardened to include the data sample window while still excluding deployment paths.
 
 Saved in memory: [project_data_source.md](../../C:/Users/timep/.claude/projects/c--Users-timep-OneDrive-Desktop-aegis-alpha-lab/memory/project_data_source.md) — reminds future sessions not to re-suggest WRDS.
 
 ### 2. `content_hash()` platform-invariance fix (Day 1 follow-up)
-Early `content_hash()` included `DataConfig.paths`, which stored `pathlib.Path` values that serialize with platform-dependent separators (`data\raw` on Windows, `data/raw` on POSIX). Caught before any ledger rows were written; fixed by excluding `data.*` from the hash (research identity ≠ deployment layout). Verified Windows-host `093a33a5…` matches Linux-Docker `093a33a5…`.
+Early `content_hash()` included `DataConfig.paths`, which stored `pathlib.Path` values that serialize with platform-dependent separators (`data\raw` on Windows, `data/raw` on POSIX). Caught before any ledger rows were written; fixed by excluding deployment paths from the hash (research identity != deployment layout). Week 2 hardening kept that path invariance but added the data sample window to the hash so replay detects sample-window drift.
 
 ### 3. CRSP corporate-action simplification
 Spec §7 and the original Week 1 plan included a `corporate_actions.py` module using CRSP's `cfacpr`/`cfacshr` factors. Polygon serves adjusted prices directly via `adjusted=True`, so Day 3 didn't need a custom adjuster — `ret_1d = log(adj_close / adj_close.shift(1))` per ticker is the full story.
@@ -58,7 +58,7 @@ From the Day 6 end-to-end run (`uv run aegis backtest week1`):
 
 **Factor ([data/processed/factor_mom_12_1_week1.parquet](../../data/processed/factor_mom_12_1_week1.parquet))**
 - Same 3,664 (date, ticker) shape
-- 1,648 valid rows — exactly matches panel eligibility (factor compute is universe-agnostic by design)
+- 1,648 finite and tradable rows — exactly matches panel eligibility on this smoke universe
 - Per-date `zscore_value` mean = 0.000000 across all dates with ≥2 eligible tickers
 - AAPL's 2026-03-31 raw 12-1 momentum = +0.195 (≈20% log return over March 2025 → March 2026 window, matches AAPL's actual price action)
 - `feature_snapshot_id` stable across re-runs
@@ -75,7 +75,7 @@ From the Day 6 end-to-end run (`uv run aegis backtest week1`):
 - **6 preserved xfails** — one per spec §6 module, encoding the roadmap machine-readably. `strict=True` fails CI if any module's code accidentally satisfies its acceptance test before the marker is removed.
 - **Docker image builds clean** on Linux with `polygon-api-client` pinned; multi-stage, runs as non-root, `config_hash` matches host.
 - **σ-algebra measurability** proven by truncation-stability test in [test_momentum.py](../../tests/unit/test_momentum.py) — no factor value at date t depends on any data at date > t.
-- **Append-only ledger discipline** proven at the interface level: `store.__all__` contains no `update_*` or `delete_*`; a test asserts this.
+- **Append-only ledger discipline** proven at the interface level: `store.__all__` contains no `update_*` or `delete_*`; tests assert this and SQLite foreign-key enforcement.
 
 ## What's deferred (Week 2+)
 

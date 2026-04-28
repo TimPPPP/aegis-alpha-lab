@@ -347,6 +347,7 @@ def pipeline_fixture(
         sleep_between_calls: float = 0.0,
         panel_filename: str | None = None,
         metadata_as_of=None,
+        require_all_tickers: bool = False,
     ) -> Path:
         return panel_path
 
@@ -354,7 +355,7 @@ def pipeline_fixture(
     # pipeline body out of week1.py). The Week 1 wrapper resolves these
     # through _common at call time.
     monkeypatch.setattr(backtest_common_module, "build_panel", _fake_build_panel)
-    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda: FAKE_GIT_SHA)
+    monkeypatch.setattr(backtest_common_module, "current_git_sha", lambda **_: FAKE_GIT_SHA)
 
     ledger_path = tmp_path / "ledger.sqlite"
     return test_cfg, ledger_path

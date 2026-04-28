@@ -1,7 +1,6 @@
-"""Module A — Data & PIT panel (spec §6, §7).
+"""Module A - Data & PIT panel (spec sec. 6, sec. 7).
 
-Assembles the point-in-time U.S. daily equity panel on CRSP + Compustat PIT
-via WRDS. Output: stock-date Parquet panel (~15M rows, ~60 cols). Module
-acceptance: reconstructed S&P 500 membership on any past date matches the
-published index within 1 name.
+Assembles Polygon-backed daily equity panels plus the reference data needed
+for date-aware S&P 500 universe reconstruction. Week 1 is an 8-name smoke
+slice; Week 2 adds delisting-aware S&P 500 resolution.
 """

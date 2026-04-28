@@ -43,6 +43,7 @@ _OUTPUT_COLUMNS: tuple[str, ...] = (
     "winsorized_value",
     "zscore_value",
     "valid_flag",
+    "tradable_flag",
     "feature_snapshot_id",
 )
 
@@ -87,10 +88,25 @@ class Momentum12m1m(Factor):
         # valid_flag: true iff all three values are finite (non-NaN, non-inf).
         values = working[["raw_value", "winsorized_value", "zscore_value"]]
         working["valid_flag"] = np.isfinite(values.to_numpy()).all(axis=1)
+        if "eligible_flag" in df.columns:
+            eligible = df["eligible_flag"].fillna(False).astype(bool).to_numpy()
+        else:
+            eligible = np.ones(len(df), dtype=bool)
+        working["tradable_flag"] = working["valid_flag"].to_numpy() & eligible
 
-        # feature_snapshot_id: deterministic hash of (date, ticker, three values).
+        # feature_snapshot_id: deterministic hash of factor values and signal availability.
         snapshot = sha256_dataframe(
-            working[["date", "ticker", "raw_value", "winsorized_value", "zscore_value"]]
+            working[
+                [
+                    "date",
+                    "ticker",
+                    "raw_value",
+                    "winsorized_value",
+                    "zscore_value",
+                    "valid_flag",
+                    "tradable_flag",
+                ]
+            ]
         )
         working["feature_snapshot_id"] = snapshot
         working["factor_name"] = self.name

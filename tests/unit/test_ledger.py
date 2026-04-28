@@ -16,7 +16,7 @@ from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from aegis.backtest.week1 import run_week1_slice
@@ -35,7 +35,7 @@ from aegis.ledger.store import (
     register_candidate,
     register_experiment,
 )
-from aegis.utils.git import GitShaUnavailableError, current_git_sha
+from aegis.utils.git import DirtyGitWorktreeError, GitShaUnavailableError, current_git_sha
 from aegis.utils.hashing import sha256_file
 from tests.conftest import ledger_snapshot
 
@@ -286,15 +286,24 @@ def test_register_candidate_foreign_key_to_experiment() -> None:
     subsequent commit on clean exit would fail with PendingRollbackError.
     """
     with pytest.raises(IntegrityError), open_ledger(MEMORY) as session:
-        # SQLite's default mode doesn't enforce FKs; enable them here.
-        session.execute(text("PRAGMA foreign_keys = ON"))
-
         register_candidate(
             session,
             experiment_id=uuid4(),  # unlinked to any experiment row
             candidate_name="mom_12_1",
             formula_string="log(P[t-21] / P[t-252])",
             data_snapshot_id=HASH,
+        )
+
+
+def test_register_artifact_foreign_key_to_candidate() -> None:
+    """An artifact with a bogus candidate_id must fail the FK."""
+    with pytest.raises(IntegrityError), open_ledger(MEMORY) as session:
+        register_artifact(
+            session,
+            candidate_id=uuid4(),
+            artifact_type="panel",
+            path=Path("missing.parquet"),
+            checksum=HASH,
         )
 
 
@@ -416,6 +425,49 @@ def test_git_sha_falls_back_to_subprocess(tmp_path: Path, monkeypatch: pytest.Mo
     assert len(sha) >= 7
     # Hex-only
     int(sha, 16)
+
+
+def test_git_sha_requires_clean_worktree_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ledger-writing runs must not stamp a clean SHA over dirty code."""
+    monkeypatch.delenv("AEGIS_GIT_SHA", raising=False)
+    monkeypatch.delenv("AEGIS_ALLOW_DIRTY_GIT", raising=False)
+
+    def _fake_run(
+        args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:3] == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="a1b2c3d\n")
+        if args[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout=" M src/aegis/x.py\n"
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    with pytest.raises(DirtyGitWorktreeError):
+        current_git_sha(require_clean=True)
+
+
+def test_git_sha_dirty_override_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AEGIS_ALLOW_DIRTY_GIT permits intentionally dirty development runs."""
+    monkeypatch.delenv("AEGIS_GIT_SHA", raising=False)
+    monkeypatch.setenv("AEGIS_ALLOW_DIRTY_GIT", "1")
+
+    def _fake_run(
+        args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:3] == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="a1b2c3d\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    assert current_git_sha(require_clean=True) == "a1b2c3d"
 
 
 def test_git_sha_raises_when_neither_available(monkeypatch: pytest.MonkeyPatch) -> None:

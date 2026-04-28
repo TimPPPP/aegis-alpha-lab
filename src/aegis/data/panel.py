@@ -75,6 +75,7 @@ def build_panel(
     sleep_between_calls: float = 12.5,
     panel_filename: str | None = None,
     metadata_as_of: date | None = None,
+    require_all_tickers: bool = False,
 ) -> Path:
     """Build the Week 1 PIT panel end-to-end and write to Parquet.
 
@@ -94,6 +95,9 @@ def build_panel(
             Full-universe historical runs pass the sample-date anchor so
             renamed/delisted tickers are classified as they were then, not
             by today's ticker state.
+        require_all_tickers: If True, the loader must return data for every
+            requested ticker. Week 1 uses this because its fixed 8-name smoke
+            universe should fail loudly on any missing name.
 
     Returns:
         Path to the written Parquet file.
@@ -106,6 +110,7 @@ def build_panel(
         end=cfg.data.date_range.end,
         sleep_between_calls=sleep_between_calls,
         metadata_as_of=metadata_as_of,
+        require_all_tickers=require_all_tickers,
     )
     if raw.empty:
         raise RuntimeError(

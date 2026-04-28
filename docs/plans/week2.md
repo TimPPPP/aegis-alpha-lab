@@ -379,7 +379,7 @@ Remaining xfails after Week 2: C (IC within 0.005 — Module E, Week 13–15), D
    ```
    Expect: clean, 105+ passed, 4 xfailed, 0 failed.
 
-6. **content_hash stays `093a33a5…`** — Week 2 adds no research-identity fields and no column renames.
+6. **content_hash discipline holds** — data paths stay excluded, but the data sample definition is part of research identity so sample-window drift is detected.
 
 ## Explicitly out of scope for Week 2
 
@@ -403,7 +403,7 @@ Must-land (Week 2 counts as successful with all nine):
 - [ ] `aegis backtest full --date 2025-06-15` runs end-to-end against live Polygon (~500 tickers). **Target wall time 15–25 min on Starter**; a mild miss (say, up to ~40 min) is a reportable operational issue (Polygon congestion, local network, etc.) — not an automatic week failure. What matters for must-land: the pipeline *completes* end-to-end and writes all expected artifacts + ledger rows.
 - [ ] Ledger has a `week2_full_universe_<date>` experiment row with ~500 tickers
 - [ ] `docs/reports/week2.md` written with real-scale numbers from the live run
-- [ ] Ruff + mypy + pytest green; `content_hash()` = `093a33a5…`
+- [ ] Ruff + mypy + pytest green; `content_hash()` is stable for unchanged research identity and changes on sample-window drift
 
 ## Readiness gate for Week 3
 
