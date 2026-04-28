@@ -71,12 +71,21 @@ def run_full_slice(
 
     experiment_name = f"{EXPERIMENT_NAME_PREFIX}_{sample_date.isoformat()}"
 
+    # Date-tagged filenames so the full-universe artifacts don't overwrite
+    # Week 1's at ``daily_panel_week1.parquet`` (which would invalidate the
+    # Week 1 ledger row's recorded checksums).
+    iso = sample_date.isoformat()
+    panel_filename = f"daily_panel_full_{iso}.parquet"
+    factor_filename = f"factor_mom_12_1_full_{iso}.parquet"
+
     return _run_factor_slice(
         cfg,
         ledger_path,
         tickers=tickers,
         experiment_name=experiment_name,
         sleep_between_calls=sleep_between_calls,
+        panel_filename=panel_filename,
+        factor_filename=factor_filename,
     )
 
 

@@ -73,6 +73,7 @@ def build_panel(
     tickers: Sequence[str] | None = None,
     *,
     sleep_between_calls: float = 12.5,
+    panel_filename: str | None = None,
 ) -> Path:
     """Build the Week 1 PIT panel end-to-end and write to Parquet.
 
@@ -83,6 +84,11 @@ def build_panel(
             :data:`WEEK1_TICKERS`.
         sleep_between_calls: Seconds to wait between Polygon API calls.
             Defaults to 12.5 (free-tier safe). Paid-tier users pass 0.
+        panel_filename: Override the basename of the output Parquet
+            (joined onto ``cfg.data.paths.processed``). Defaults to
+            ``cfg.data.snapshot.panel_filename`` (Week 1's filename).
+            Day 13's full-universe slice passes a date-tagged filename
+            so its artifacts don't collide with Week 1's.
 
     Returns:
         Path to the written Parquet file.
@@ -104,7 +110,8 @@ def build_panel(
 
     panel = _finalize_panel(raw, cfg)
 
-    out_path = cfg.data.paths.processed / cfg.data.snapshot.panel_filename
+    out_basename = panel_filename or cfg.data.snapshot.panel_filename
+    out_path = cfg.data.paths.processed / out_basename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     panel.to_parquet(out_path, index=False)
     return out_path

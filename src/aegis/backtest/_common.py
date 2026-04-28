@@ -64,6 +64,8 @@ def _run_factor_slice(
     tickers: Sequence[str],
     experiment_name: str,
     sleep_between_calls: float,
+    panel_filename: str | None = None,
+    factor_filename: str | None = None,
 ) -> SliceResult:
     """Build panel for ``tickers``, compute mom_12_1, write artifacts, ledger.
 
@@ -71,9 +73,22 @@ def _run_factor_slice(
     :func:`aegis.backtest.full.run_full_slice`. The function is intentionally
     side-effectful: writes two Parquets to ``cfg.data.paths.processed`` and
     appends three rows to the ledger SQLite at ``ledger_path``.
+
+    ``panel_filename`` and ``factor_filename`` default to the
+    ``cfg.data.snapshot.*`` values (Week 1's filenames), but Week 2's
+    full-universe slice overrides them so the two slices' artifacts don't
+    collide on disk and break each other's ledger checksums.
     """
+    panel_basename = panel_filename or cfg.data.snapshot.panel_filename
+    factor_basename = factor_filename or cfg.data.snapshot.factor_filename
+
     # 1. Pull + filter + write panel (Day 3 plumbing; tickers parameter from Day 10).
-    panel_path = build_panel(cfg, tickers=list(tickers), sleep_between_calls=sleep_between_calls)
+    panel_path = build_panel(
+        cfg,
+        tickers=list(tickers),
+        sleep_between_calls=sleep_between_calls,
+        panel_filename=panel_basename,
+    )
     panel = pd.read_parquet(panel_path)
     data_snapshot_id = str(panel["data_snapshot_id"].iloc[0])
     panel_rows = len(panel)
@@ -84,7 +99,7 @@ def _run_factor_slice(
     factor_valid_rows = int(factor_out["valid_flag"].sum())
 
     # 3. Write factor Parquet alongside the panel.
-    factor_path = cfg.data.paths.processed / cfg.data.snapshot.factor_filename
+    factor_path = cfg.data.paths.processed / factor_basename
     factor_path.parent.mkdir(parents=True, exist_ok=True)
     factor_out.to_parquet(factor_path, index=False)
 

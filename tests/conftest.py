@@ -341,7 +341,11 @@ def pipeline_fixture(
     finalized.to_parquet(panel_path, index=False)
 
     def _fake_build_panel(
-        cfg: AegisConfig, *, tickers=None, sleep_between_calls: float = 0.0
+        cfg: AegisConfig,
+        *,
+        tickers=None,
+        sleep_between_calls: float = 0.0,
+        panel_filename: str | None = None,
     ) -> Path:
         return panel_path
 
