@@ -1,10 +1,10 @@
 """Module B acceptance + Day 4 unit coverage for the research ledger.
 
-The spec §6 Module B acceptance test (every promoted factor replays
-bit-identical from the ledger) stays ``xfail`` until Week 2 lands the
-replay engine. The Day 4 tests below exercise the write API: open_ledger,
-register_experiment / _candidate / _artifact, foreign-key integrity, and
-the append-only interface contract.
+Spec §6 Module B acceptance — verify-mode replay (artifact checksums +
+config_hash + git SHA all match the ledger row) — flipped on Week 2 Day 12.
+Plus four mismatch / non-mutation tests pinning the failure paths and
+the structural non-mutation guarantee. Day 4 write-API tests sit
+alongside.
 """
 
 from __future__ import annotations
@@ -19,7 +19,14 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from aegis.ledger import store
+from aegis.backtest.week1 import run_week1_slice
+from aegis.config import AegisConfig
+from aegis.ledger import (
+    FAILURE_CHECKSUM_MISMATCH,
+    FAILURE_FILE_MISSING,
+    store,
+    verify,
+)
 from aegis.ledger.schema import Artifact, Base, Candidate, Experiment
 from aegis.ledger.store import (
     open_ledger,
@@ -28,19 +35,149 @@ from aegis.ledger.store import (
     register_experiment,
 )
 from aegis.utils.git import GitShaUnavailableError, current_git_sha
+from aegis.utils.hashing import sha256_file
+from tests.conftest import ledger_snapshot
 
 HASH = "a" * 64
 MEMORY = Path(":memory:")
 
 
-# --- Preserved Module B acceptance stub -------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    reason="Module B replay engine is Week 2 (spec §6 acceptance)",
-)
-def test_promoted_factor_replays_bit_identical() -> None:
-    """Every promoted factor replays bit-identical from the ledger + PIT snapshot."""
-    raise NotImplementedError
+# --- Module B §6 acceptance — Day 12 flip -----------------------------------
+
+
+def test_promoted_factor_replays_bit_identical(
+    pipeline_fixture: tuple[AegisConfig, Path],
+    patched_git_sha: None,
+) -> None:
+    """Spec §6 Module B — verify-mode replay (Week 2 interpretation).
+
+    A freshly-written candidate verifies cleanly: every artifact's
+    sha256_file matches the recorded checksum, the live ``content_hash()``
+    equals the stored one, and the recorded git SHA is reachable. Full
+    rebuild-from-source replay is V2 scope; verify-mode is the Week 2
+    acceptance interpretation.
+    """
+    cfg, ledger_path = pipeline_fixture
+    result = run_week1_slice(cfg, ledger_path, sleep_between_calls=0)
+
+    report = verify(result.candidate_id, ledger_path, cfg)
+
+    assert report.artifacts_verified == 2
+    assert report.artifacts_failed == []
+    assert report.config_hash_match is True
+    assert report.config_hash_recorded == cfg.content_hash()
+    assert report.git_sha_available is True
+    assert report.all_ok is True
+
+
+def test_replay_detects_modified_artifact(
+    pipeline_fixture: tuple[AegisConfig, Path],
+    patched_git_sha: None,
+) -> None:
+    """A single corrupted byte in an artifact surfaces as ``checksum_mismatch``."""
+    cfg, ledger_path = pipeline_fixture
+    result = run_week1_slice(cfg, ledger_path, sleep_between_calls=0)
+
+    # Corrupt the panel by appending bytes — leaves the factor untouched.
+    result.panel_path.write_bytes(result.panel_path.read_bytes() + b"\nGARBAGE")
+
+    report = verify(result.candidate_id, ledger_path, cfg)
+
+    assert (str(result.panel_path), FAILURE_CHECKSUM_MISMATCH) in report.artifacts_failed
+    assert report.artifacts_verified == 1  # the factor still passes
+    assert report.all_ok is False
+    # No exception raised; the report is still well-formed.
+    assert report.config_hash_match is True
+    assert report.git_sha_available is True
+
+
+def test_replay_detects_missing_artifact(
+    pipeline_fixture: tuple[AegisConfig, Path],
+    patched_git_sha: None,
+) -> None:
+    """Deleting an artifact file surfaces as ``file_missing``."""
+    cfg, ledger_path = pipeline_fixture
+    result = run_week1_slice(cfg, ledger_path, sleep_between_calls=0)
+
+    result.factor_path.unlink()
+
+    report = verify(result.candidate_id, ledger_path, cfg)
+
+    assert (str(result.factor_path), FAILURE_FILE_MISSING) in report.artifacts_failed
+    assert report.artifacts_verified == 1  # the panel still passes
+    assert report.all_ok is False
+
+
+def test_replay_detects_config_hash_drift(
+    pipeline_fixture: tuple[AegisConfig, Path],
+    patched_git_sha: None,
+) -> None:
+    """Changing a research-identity config field flips ``config_hash_match`` to False."""
+    cfg, ledger_path = pipeline_fixture
+    result = run_week1_slice(cfg, ledger_path, sleep_between_calls=0)
+
+    drifted_cfg = cfg.model_copy(
+        update={
+            "gates": cfg.gates.model_copy(
+                update={
+                    "promotion": cfg.gates.promotion.model_copy(update={"t_ic_min": 99.0}),
+                }
+            )
+        }
+    )
+    assert drifted_cfg.content_hash() != cfg.content_hash()  # sanity: tweak registered
+
+    report = verify(result.candidate_id, ledger_path, drifted_cfg)
+
+    assert report.config_hash_recorded == cfg.content_hash()
+    assert report.config_hash_current == drifted_cfg.content_hash()
+    assert report.config_hash_match is False
+    # Artifacts still pass; only the config drifted.
+    assert report.artifacts_verified == 2
+    assert report.artifacts_failed == []
+    assert report.all_ok is False
+
+
+def test_verify_does_not_mutate_ledger_or_artifacts(
+    pipeline_fixture: tuple[AegisConfig, Path],
+    patched_git_sha: None,
+) -> None:
+    """Spec principle 5 — verify() is non-mutating in BOTH happy-path and failure-path.
+
+    Snapshots ledger row-counts and per-artifact ``sha256_file`` before and
+    after each call, asserts both unchanged. Day 11's read-only SQLite URL
+    enforces this at the connection layer; this test is the regression
+    guard against any future refactor that breaks the invariant.
+    """
+    cfg, ledger_path = pipeline_fixture
+    result = run_week1_slice(cfg, ledger_path, sleep_between_calls=0)
+
+    pre_snap = ledger_snapshot(ledger_path)
+    pre_panel_sha = sha256_file(result.panel_path)
+    pre_factor_sha = sha256_file(result.factor_path)
+
+    # --- Happy path ---
+    report1 = verify(result.candidate_id, ledger_path, cfg)
+    assert report1.all_ok is True
+
+    assert ledger_snapshot(ledger_path) == pre_snap
+    assert sha256_file(result.panel_path) == pre_panel_sha
+    assert sha256_file(result.factor_path) == pre_factor_sha
+
+    # --- Failure path: deliberately corrupt the panel ---
+    result.panel_path.write_bytes(result.panel_path.read_bytes() + b"\nGARBAGE")
+    post_corrupt_panel_sha = sha256_file(result.panel_path)
+    assert post_corrupt_panel_sha != pre_panel_sha  # corruption registered
+
+    report2 = verify(result.candidate_id, ledger_path, cfg)
+    assert report2.all_ok is False
+
+    # Ledger row counts unchanged across BOTH verify calls.
+    assert ledger_snapshot(ledger_path) == pre_snap
+    # verify() did not "fix" the corrupted file (writes are forbidden).
+    assert sha256_file(result.panel_path) == post_corrupt_panel_sha
+    # The other artifact remains pristine.
+    assert sha256_file(result.factor_path) == pre_factor_sha
 
 
 # --- Table creation ----------------------------------------------------------

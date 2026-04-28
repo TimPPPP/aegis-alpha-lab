@@ -12,12 +12,19 @@ user to ``source .env`` manually. Already-set env vars are never overridden.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+from sqlalchemy import select
 
+from aegis.backtest import week1 as week1_module
+from aegis.config import AegisConfig, load_all
+from aegis.data.panel import _finalize_panel
+from aegis.ledger.schema import Artifact, Candidate, Experiment
+from aegis.ledger.store import open_ledger
 from aegis.utils.dotenv import load_dotenv_if_present
 
 # Load .env at conftest import so @pytest.mark.polygon tests see POLYGON_API_KEY.
@@ -232,3 +239,112 @@ def stock_daily_panel() -> pd.DataFrame:
     )
 
     return pd.concat(parts, ignore_index=True)
+
+
+# --- Week 1 / Week 2 ledger pipeline scaffolding ----------------------------
+# Lifted from tests/unit/test_week1_pipeline.py on Day 12 so test_ledger.py
+# can consume the same fixture. Polygon-free by construction: monkey-patches
+# ``build_panel`` and ``current_git_sha`` inside :mod:`aegis.backtest.week1`.
+
+# Deterministic git SHA stamped by the pipeline in tests (no subprocess).
+FAKE_GIT_SHA: str = "a1b2c3d4e5f6"
+
+
+@dataclass(frozen=True)
+class LedgerSnapshot:
+    """Plain-value snapshot of the ledger at one moment, safe to use post-session."""
+
+    experiments: list[dict[str, str]]
+    candidates: list[dict[str, str]]
+    artifacts: list[dict[str, str]]
+
+
+def ledger_snapshot(ledger_path: Path) -> LedgerSnapshot:
+    """Read every row into a dict, avoiding DetachedInstanceError."""
+    with open_ledger(ledger_path) as session:
+        experiments = [
+            {
+                "experiment_id": e.experiment_id,
+                "name": e.name,
+                "config_hash": e.config_hash,
+                "git_sha": e.git_sha,
+            }
+            for e in session.execute(select(Experiment)).scalars().all()
+        ]
+        candidates = [
+            {
+                "candidate_id": c.candidate_id,
+                "experiment_id": c.experiment_id,
+                "candidate_name": c.candidate_name,
+                "candidate_type": c.candidate_type,
+                "formula_string": c.formula_string,
+                "data_snapshot_id": c.data_snapshot_id,
+                "status": c.status,
+            }
+            for c in session.execute(select(Candidate)).scalars().all()
+        ]
+        artifacts = [
+            {
+                "artifact_id": a.artifact_id,
+                "candidate_id": a.candidate_id,
+                "artifact_type": a.artifact_type,
+                "path": a.path,
+                "checksum": a.checksum,
+            }
+            for a in session.execute(select(Artifact)).scalars().all()
+        ]
+    return LedgerSnapshot(experiments=experiments, candidates=candidates, artifacts=artifacts)
+
+
+@pytest.fixture
+def patched_git_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force ``aegis.ledger.replay._check_git_sha`` to return True.
+
+    The :data:`FAKE_GIT_SHA` stamped by ``pipeline_fixture`` is not a real
+    git object, so the real ``_check_git_sha`` would return False — useful
+    in production but unhelpful when a test wants to assert
+    ``git_sha_available is True``. Verify-mode tests that don't care about
+    this branch consume this fixture to short-circuit the check.
+    """
+    from aegis.ledger import replay as replay_module
+
+    monkeypatch.setattr(replay_module, "_check_git_sha", lambda sha: True)
+
+
+@pytest.fixture
+def pipeline_fixture(
+    stock_daily_panel: pd.DataFrame,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[AegisConfig, Path]:
+    """Isolated pipeline invocation: redirected paths, mocked loader + git.
+
+    Returns ``(test_cfg, ledger_path)``. Tests then call ``run_week1_slice``
+    themselves and reason about the resulting ledger / artifacts.
+    """
+    cfg = load_all()
+
+    test_cfg = cfg.model_copy(
+        update={
+            "data": cfg.data.model_copy(
+                update={
+                    "paths": cfg.data.paths.model_copy(update={"processed": tmp_path}),
+                }
+            )
+        }
+    )
+
+    # Pre-finalize the fixture through Day 3's pipeline → writes the panel
+    # Parquet exactly where build_panel would write it.
+    finalized = _finalize_panel(stock_daily_panel, test_cfg)
+    panel_path = tmp_path / test_cfg.data.snapshot.panel_filename
+    finalized.to_parquet(panel_path, index=False)
+
+    def _fake_build_panel(cfg: AegisConfig, *, sleep_between_calls: float = 0.0) -> Path:
+        return panel_path
+
+    monkeypatch.setattr(week1_module, "build_panel", _fake_build_panel)
+    monkeypatch.setattr(week1_module, "current_git_sha", lambda: FAKE_GIT_SHA)
+
+    ledger_path = tmp_path / "ledger.sqlite"
+    return test_cfg, ledger_path

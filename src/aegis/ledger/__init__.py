@@ -13,14 +13,18 @@ Public API:
     ArtifactRow / ProvenanceRow — frozen dataclasses returned by reads
     verify                      — verify-mode replay (Week 2 Day 11)
     ReplayReport                — result of verify()
-    replay                      — full rebuild-from-source replay (V2 stub)
+
+The ``replay`` symbol is **not** re-exported here (V2 full-rebuild scope).
+Import it directly from :mod:`aegis.ledger.replay` if you need to call the
+stub. Re-exporting it would shadow the ``replay`` submodule itself when
+accessed as ``aegis.ledger.replay``, which breaks ``monkeypatch.setattr``
+of module-level helpers in tests.
 """
 
 from aegis.ledger.replay import (
     FAILURE_CHECKSUM_MISMATCH,
     FAILURE_FILE_MISSING,
     ReplayReport,
-    replay,
     verify,
 )
 from aegis.ledger.store import (
@@ -44,6 +48,5 @@ __all__ = [
     "register_artifact",
     "register_candidate",
     "register_experiment",
-    "replay",
     "verify",
 ]
