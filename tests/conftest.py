@@ -245,8 +245,8 @@ def stock_daily_panel() -> pd.DataFrame:
 
 # --- Week 3 Day 16 fundamentals fixture --------------------------------------
 #
-# An engineered ~33-row fundamentals frame, shape-aligned with the scraper's
-# EXPECTED_COLUMNS. Encodes 5 distinct cases used by tests/unit/test_fundamentals.py
+# An engineered ~45-row fundamentals frame, shape-aligned with the scraper's
+# EXPECTED_COLUMNS. Encodes 7 distinct cases used by tests/unit/test_fundamentals.py
 # AND tests/unit/test_earnings_yield.py (Day 17). Polygon-free by construction.
 #
 # Cases:
@@ -265,6 +265,10 @@ def stock_daily_panel() -> pd.DataFrame:
 #   SHORT_X   — 2 quarterlies only -> ttm_at returns None (insufficient_quarters).
 #   SPARSE_X  — 4 quarterlies all PIT-eligible, but Q2 has revenues=None
 #               -> ttm_with_status returns missing_field_value.
+#   GAP_X     — Q1, Q2, Q4, next-FY Q1. Has four PIT-eligible rows, but not
+#               four consecutive fiscal quarters -> insufficient_quarters.
+#   REUSE_X   — same ticker, two CIKs, each with four valid-looking quarterlies.
+#               Ticker-only lookup must not blend the two histories.
 #   MISSING_X — appears nowhere in the fixture -> missing_fundamentals.
 
 _FUND_COLUMNS: tuple[str, ...] = (
@@ -497,6 +501,58 @@ def _sparse_x_rows() -> list[dict[str, Any]]:
     ]
 
 
+def _gap_x_rows() -> list[dict[str, Any]]:
+    """Four PIT-eligible quarterlies with a missing middle fiscal quarter."""
+    quarters = [
+        (2024, 1, date(2023, 12, 31), date(2024, 1, 31), 100, 10),
+        (2024, 2, date(2024, 3, 31), date(2024, 4, 30), 200, 20),
+        # FY24-Q3 is intentionally absent.
+        (2024, 4, date(2024, 9, 30), date(2024, 10, 31), 400, 40),
+        (2025, 1, date(2024, 12, 31), date(2025, 1, 31), 500, 50),
+    ]
+    return [
+        _fund_row(
+            "GAP_X",
+            77777,
+            fiscal_year=fy,
+            fiscal_quarter=fq,
+            filing_date=fd,
+            period_end_date=pe,
+            period_kind="quarterly",
+            revenues=float(rev),
+            net_income=float(ni),
+        )
+        for (fy, fq, pe, fd, rev, ni) in quarters
+    ]
+
+
+def _reuse_x_rows() -> list[dict[str, Any]]:
+    """Same ticker reused across two CIKs; callers must resolve by CIK."""
+    rows: list[dict[str, Any]] = []
+    for cik, base in ((11111, 10), (22222, 100)):
+        quarters = [
+            (2024, 1, date(2023, 12, 31), date(2024, 1, 31), base * 1, base * 0.1),
+            (2024, 2, date(2024, 3, 31), date(2024, 4, 30), base * 2, base * 0.2),
+            (2024, 3, date(2024, 6, 30), date(2024, 7, 31), base * 3, base * 0.3),
+            (2024, 4, date(2024, 9, 30), date(2024, 10, 31), base * 4, base * 0.4),
+        ]
+        rows.extend(
+            _fund_row(
+                "REUSE_X",
+                cik,
+                fiscal_year=fy,
+                fiscal_quarter=fq,
+                filing_date=fd,
+                period_end_date=pe,
+                period_kind="quarterly",
+                revenues=float(rev),
+                net_income=float(ni),
+            )
+            for (fy, fq, pe, fd, rev, ni) in quarters
+        )
+    return rows
+
+
 @pytest.fixture(scope="session")
 def fundamentals_fixture() -> pd.DataFrame:
     """Engineered fundamentals frame for Day 16 / Day 17 tests.
@@ -504,7 +560,15 @@ def fundamentals_fixture() -> pd.DataFrame:
     See the comment block above for the encoded cases. The frame is
     session-scoped — tests must not mutate it.
     """
-    rows = _aapl_x_rows() + _msft_x_rows() + _mar_fy_x_rows() + _short_x_rows() + _sparse_x_rows()
+    rows = (
+        _aapl_x_rows()
+        + _msft_x_rows()
+        + _mar_fy_x_rows()
+        + _short_x_rows()
+        + _sparse_x_rows()
+        + _gap_x_rows()
+        + _reuse_x_rows()
+    )
     df = pd.DataFrame(rows, columns=list(_FUND_COLUMNS))
     return df
 

@@ -136,6 +136,21 @@ def test_ttm_at_returns_none_when_fewer_than_four_quarters_pit_available(
     assert ttm_at("SHORT_X", date(2025, 1, 1), fundamentals_fixture, "revenues") is None
 
 
+def test_ttm_requires_four_consecutive_fiscal_quarters(
+    fundamentals_fixture: pd.DataFrame,
+) -> None:
+    df = fundamentals_fixture
+    # GAP_X has four PIT-eligible quarterlies, but FY24-Q3 is missing:
+    # FY24-Q1, FY24-Q2, FY24-Q4, FY25-Q1. This is not a valid TTM window.
+    as_of = date(2025, 3, 1)
+    assert ttm_at("GAP_X", as_of, df, "revenues") is None
+    assert ttm_with_status("GAP_X", as_of, df, "revenues") == (
+        None,
+        "insufficient_quarters",
+    )
+    assert oldest_ttm_component_lag_days("GAP_X", as_of, df) is None
+
+
 # --- 9. Fiscal-year boundary: TTM crosses fiscal years correctly ------------
 def test_ttm_at_handles_fiscal_year_boundary(
     fundamentals_fixture: pd.DataFrame,
@@ -181,6 +196,31 @@ def test_ttm_with_status_distinguishes_missing_field_value(
     val, status = ttm_with_status("SPARSE_X", date(2025, 1, 1), fundamentals_fixture, "net_income")
     assert val == 100.0  # 10+20+30+40
     assert status is None
+
+
+def test_ttm_requires_cik_when_ticker_history_is_ambiguous(
+    fundamentals_fixture: pd.DataFrame,
+) -> None:
+    df = fundamentals_fixture
+    as_of = date(2025, 1, 1)
+    assert fundamentals_at("REUSE_X", as_of, df) is None
+    assert latest_filing_lag_days("REUSE_X", as_of, df) is None
+    assert ttm_at("REUSE_X", as_of, df, "revenues") is None
+    assert ttm_with_status("REUSE_X", as_of, df, "revenues") == (
+        None,
+        "ambiguous_cik",
+    )
+
+    assert ttm_at("REUSE_X", as_of, df, "revenues", cik=22222) == 1000.0
+    assert ttm_at("REUSE_X", as_of, df, "revenues", cik="0000022222") == 1000.0
+
+    row = fundamentals_at("REUSE_X", as_of, df, cik=11111)
+    assert row is not None
+    assert row["cik"] == 11111
+    assert row["revenues"] == 40.0
+    assert (
+        latest_filing_lag_days("REUSE_X", as_of, df, cik=11111) == (as_of - date(2024, 10, 31)).days
+    )
 
 
 # --- 12. latest_filing_lag_days ---------------------------------------------
@@ -235,9 +275,8 @@ def test_coverage_window_returns_long_format_per_date_per_ticker(
     fundamentals_fixture: pd.DataFrame,
 ) -> None:
     cw = coverage_window(date(2024, 1, 1), date(2024, 1, 3), fundamentals_fixture)
-    # 3 calendar days × 5 tickers in the fixture (AAPL_X, MSFT_X, MAR_FY_X, SHORT_X, SPARSE_X)
     assert tuple(cw.columns) == ("date", "ticker", "has_pit_fundamentals")
-    assert len(cw) == 3 * 5
+    assert len(cw) == 3 * fundamentals_fixture["ticker"].nunique()
     # On 2024-01-01, no AAPL_X filing has happened yet (Q1 filed 2024-01-25).
     aapl_jan1 = cw[(cw["date"] == date(2024, 1, 1)) & (cw["ticker"] == "AAPL_X")]
     assert aapl_jan1["has_pit_fundamentals"].iloc[0] is False or (
