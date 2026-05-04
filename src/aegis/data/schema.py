@@ -239,8 +239,106 @@ class TickerAliasRow(_FrozenRow):
         return self
 
 
+PeriodKind = Literal["quarterly", "annual", "trailing_twelve_months"]
+
+# The three Polygon v1 financial statement endpoints. A merged FundamentalsRow
+# may carry data from any subset of these (Polygon files them separately and
+# they're not always all present for the same fiscal period yet).
+FinancialEndpoint = Literal["income_statements", "balance_sheets", "cash_flow_statements"]
+
+
+class FundamentalsRow(_FrozenRow):
+    """One Polygon v1 financial statement row (Week 3 Day 15).
+
+    PIT discipline (spec §4.1): ``filing_date`` is the t-1 visibility boundary,
+    NOT ``period_end_date``. ``period_end_date`` is "what economic period this
+    report describes"; ``filing_date`` is "when this report became publicly
+    available." Only the latter is F_t-measurable at t.
+
+    Logical key: ``(ticker_or_cik, fiscal_year, fiscal_quarter, period_kind)``.
+    Restatements break uniqueness on this key — multiple rows can share a
+    fiscal period with different ``filing_date`` values. PIT lookup helpers
+    (Day 16) de-dupe by keeping the latest filing per period.
+
+    Field naming matches our internal vocabulary, NOT Polygon's. Mapping
+    (Polygon → ours) lives in :mod:`scripts.fetch_polygon_fundamentals`:
+      revenue → revenues
+      net_income_loss_attributable_common_shareholders → net_income
+      basic_earnings_per_share → eps_basic
+      diluted_earnings_per_share → eps_diluted
+      basic_shares_outstanding → weighted_avg_shares_basic
+      diluted_shares_outstanding → weighted_avg_shares_diluted
+      total_equity_attributable_to_parent → common_equity
+      net_cash_from_operating_activities → operating_cash_flow
+      timeframe → period_kind
+      period_end → period_end_date
+      tickers[0] → ticker (multi-class structures keep tickers[1:] dropped)
+
+    ``source_endpoints`` records which of the three Polygon endpoints
+    contributed to this merged row. A row with only an income-statement
+    fingerprint will have ``("income_statements",)``; a fully merged row
+    will have all three.
+    """
+
+    ticker: str = Field(min_length=1, max_length=16)
+    cik: int | None = None
+    filing_date: date  # PIT visibility boundary; non-null required
+    period_end_date: date  # the as-of date the report describes
+    fiscal_year: int | None = None
+    fiscal_quarter: int | None = None  # 1-4 for quarterly, None for annual/TTM
+    period_kind: PeriodKind
+
+    revenues: float | None = None
+    net_income: float | None = None
+    eps_basic: float | None = None
+    eps_diluted: float | None = None
+    weighted_avg_shares_basic: float | None = None
+    weighted_avg_shares_diluted: float | None = None
+    common_equity: float | None = None
+    total_assets: float | None = None
+    operating_cash_flow: float | None = None
+
+    source_endpoints: tuple[FinancialEndpoint, ...] = Field(default=())
+
+    @model_validator(mode="after")
+    def _filing_not_before_period_end(self) -> FundamentalsRow:
+        """Filings always land on or after the period close.
+
+        SEC Form 10-Q is due ~40-45 days after quarter-end; 10-K is ~60-90.
+        We allow same-day equality (it never happens in real data but
+        engineered fixtures should not have to invent +1 days).
+        """
+        if self.filing_date < self.period_end_date:
+            raise ValueError(
+                f"filing_date={self.filing_date} precedes "
+                f"period_end_date={self.period_end_date} "
+                "(filings always land on or after period close)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _quarter_consistent_with_kind(self) -> FundamentalsRow:
+        """quarterly rows must have fiscal_quarter ∈ {1,2,3,4}; annual/TTM
+        rows must have fiscal_quarter=None."""
+        if self.period_kind == "quarterly":
+            if self.fiscal_quarter not in (1, 2, 3, 4):
+                raise ValueError(
+                    f"period_kind='quarterly' but fiscal_quarter={self.fiscal_quarter!r} "
+                    "(must be 1, 2, 3, or 4)"
+                )
+        elif self.fiscal_quarter is not None:
+            raise ValueError(
+                f"period_kind={self.period_kind!r} but fiscal_quarter is set; "
+                "annual/TTM rows must have fiscal_quarter=None"
+            )
+        return self
+
+
 __all__ = [
     "ExchangeCode",
+    "FinancialEndpoint",
+    "FundamentalsRow",
+    "PeriodKind",
     "SP500MembershipRow",
     "StockDailyRow",
     "TickerAliasRow",

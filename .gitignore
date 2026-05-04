@@ -41,6 +41,7 @@ env/
 # sidecar IS tracked (its CSV is checked in); the ticker_metadata.meta.json
 # sidecar is NOT tracked (its parquet is gitignored).
 /data/reference/ticker_metadata.meta.json
+/data/reference/fundamentals.meta.json
 
 *.parquet
 *.arrow

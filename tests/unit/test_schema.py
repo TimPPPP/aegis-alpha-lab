@@ -18,7 +18,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from aegis.data.schema import StockDailyRow, UniverseRow
+from aegis.data.schema import FundamentalsRow, StockDailyRow, UniverseRow
 from aegis.features.base import Factor, FactorObservation
 from aegis.ledger.models import (
     ArtifactRecord,
@@ -140,6 +140,74 @@ def test_universe_row_rejects_ineligible_without_fail_reason() -> None:
 def test_universe_row_rejects_eligible_with_failing_rule() -> None:
     with pytest.raises(ValidationError):
         _good_universe_row(eligible_flag=True, price_ok=False, fail_reason=None)
+
+
+# --- FundamentalsRow ---------------------------------------------------------
+def _good_fundamentals_row(**overrides: object) -> FundamentalsRow:
+    base: dict[str, object] = {
+        "ticker": "AAPL",
+        "cik": 320193,
+        "filing_date": date(2024, 11, 1),  # ~5 weeks after period_end
+        "period_end_date": date(2024, 9, 28),
+        "fiscal_year": 2024,
+        "fiscal_quarter": 4,
+        "period_kind": "quarterly",
+        "revenues": 94_930_000_000.0,
+        "net_income": 14_736_000_000.0,
+        "eps_basic": 0.97,
+        "eps_diluted": 0.97,
+        "weighted_avg_shares_basic": 15_159_000_000.0,
+        "weighted_avg_shares_diluted": 15_236_000_000.0,
+        "common_equity": 56_950_000_000.0,
+        "total_assets": 364_980_000_000.0,
+        "operating_cash_flow": 26_811_000_000.0,
+        "source_endpoints": ("income_statements", "balance_sheets", "cash_flow_statements"),
+    }
+    base.update(overrides)
+    return FundamentalsRow(**base)
+
+
+def test_fundamentals_row_accepts_valid_quarterly() -> None:
+    row = _good_fundamentals_row()
+    assert row.ticker == "AAPL"
+    assert row.period_kind == "quarterly"
+    assert row.fiscal_quarter == 4
+    assert row.source_endpoints == (
+        "income_statements",
+        "balance_sheets",
+        "cash_flow_statements",
+    )
+
+
+def test_fundamentals_row_accepts_annual_with_no_quarter() -> None:
+    row = _good_fundamentals_row(period_kind="annual", fiscal_quarter=None)
+    assert row.period_kind == "annual"
+    assert row.fiscal_quarter is None
+
+
+def test_fundamentals_row_rejects_filing_before_period_end() -> None:
+    # Spec §4.1 PIT discipline: a filing cannot precede the period it describes.
+    with pytest.raises(ValidationError):
+        _good_fundamentals_row(
+            filing_date=date(2024, 9, 1),
+            period_end_date=date(2024, 9, 28),
+        )
+
+
+def test_fundamentals_row_rejects_quarterly_without_fiscal_quarter() -> None:
+    with pytest.raises(ValidationError):
+        _good_fundamentals_row(period_kind="quarterly", fiscal_quarter=None)
+
+
+def test_fundamentals_row_rejects_annual_with_fiscal_quarter() -> None:
+    with pytest.raises(ValidationError):
+        _good_fundamentals_row(period_kind="annual", fiscal_quarter=4)
+
+
+def test_fundamentals_row_is_frozen() -> None:
+    row = _good_fundamentals_row()
+    with pytest.raises(ValidationError):
+        row.revenues = 0.0  # type: ignore[misc]
 
 
 # --- FactorObservation -------------------------------------------------------
