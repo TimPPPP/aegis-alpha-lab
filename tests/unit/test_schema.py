@@ -264,8 +264,10 @@ def test_factor_observation_accepts_invalid_with_nulls() -> None:
         zscore_value=None,
         valid_flag=False,
         tradable_flag=False,
+        invalid_reason="history_ineligible",
     )
     assert obs.valid_flag is False
+    assert obs.invalid_reason == "history_ineligible"
 
 
 def test_factor_observation_rejects_valid_flag_with_null_value() -> None:
@@ -275,12 +277,36 @@ def test_factor_observation_rejects_valid_flag_with_null_value() -> None:
 
 def test_factor_observation_rejects_invalid_flag_with_all_values_present() -> None:
     with pytest.raises(ValidationError):
-        _good_obs(valid_flag=False)
+        _good_obs(valid_flag=False, invalid_reason="history_ineligible")
 
 
 def test_factor_observation_rejects_tradable_when_invalid() -> None:
     with pytest.raises(ValidationError):
-        _good_obs(raw_value=None, valid_flag=False, tradable_flag=True)
+        _good_obs(
+            raw_value=None,
+            valid_flag=False,
+            tradable_flag=True,
+            invalid_reason="history_ineligible",
+        )
+
+
+def test_factor_observation_rejects_valid_flag_with_invalid_reason_set() -> None:
+    # Day 17 invariant: valid_flag=True ⟹ invalid_reason is None.
+    with pytest.raises(ValidationError):
+        _good_obs(invalid_reason="history_ineligible")
+
+
+def test_factor_observation_rejects_invalid_flag_with_null_invalid_reason() -> None:
+    # Day 17 invariant: valid_flag=False ⟹ invalid_reason is set.
+    with pytest.raises(ValidationError):
+        _good_obs(
+            raw_value=None,
+            winsorized_value=None,
+            zscore_value=None,
+            valid_flag=False,
+            tradable_flag=False,
+            invalid_reason=None,
+        )
 
 
 # --- Factor ABC --------------------------------------------------------------

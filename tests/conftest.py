@@ -573,6 +573,73 @@ def fundamentals_fixture() -> pd.DataFrame:
     return df
 
 
+# --- Week 3 Day 17 EarningsYield panel fixture -------------------------------
+#
+# Tiny price panel paired with the engineered ``fundamentals_fixture`` so the
+# Day 17 EarningsYield tests have a (panel, fundamentals) pair that joins
+# cleanly. Each ticker's date is chosen so TTM is computable (or fails for
+# the documented reason) for at least one row per ticker.
+
+
+def _value_panel_for(
+    ticker: str,
+    *,
+    dates: list[date],
+    mcap: float,
+    eligible: bool = True,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": d,
+            "ticker": ticker,
+            "mcap": mcap,
+            "adj_close": 100.0,
+            "shares_out": mcap / 100.0,
+            "eligible_flag": eligible,
+        }
+        for d in dates
+    ]
+
+
+@pytest.fixture(scope="session")
+def value_panel_fixture() -> pd.DataFrame:
+    """Engineered price panel for EarningsYield tests.
+
+    Pairs with ``fundamentals_fixture``. The three "happy-path" tickers all
+    use as_of=2024-12-01 so per-date cross-sectional z-score has ≥2 valid
+    rows on that date. Hand-verifiable raw values:
+      AAPL_X    2024-12-01: TTM net_income = 100 (Q1..Q4 of FY24),
+                            mcap = 1000                       -> raw = 0.100
+      MSFT_X    2024-12-01: TTM net_income = 145 (FY24 Q2..Q4
+                            with restated Q3 + FY25 Q1), mcap = 1500
+                                                              -> raw = 0.0967
+      MAR_FY_X  2024-12-01: TTM net_income = 180 (latest 4 cross
+                            FY24->FY25 boundary),  mcap = 2000 -> raw = 0.090
+      MISSING_X 2025-01-01: panel row exists but no fundamentals
+                            -> invalid_reason="missing_fundamentals"
+      SHORT_X   2025-01-01: only 2 quarterlies in fundamentals
+                            -> invalid_reason="insufficient_quarters"
+      SPARSE_X  2025-01-01: 4 quarterlies, Q2 has revenues=None;
+                            net_income is fine (sum=100, mcap=500)
+                            -> raw = 0.200 but cross-sectional z-score
+                            on 2025-01-01 has only this one valid row,
+                            so zscore -> NaN -> invalid_reason="raw_factor_nan"
+                            after the cross-sectional pass.
+      REUSE_X   2025-01-01: ticker reused across 2 CIKs without
+                            panel-side CIK -> invalid_reason="missing_fundamentals"
+                            (Day 17 conservative collapse for ambiguous_cik).
+    """
+    rows: list[dict[str, Any]] = []
+    rows.extend(_value_panel_for("AAPL_X", dates=[date(2024, 12, 1)], mcap=1000.0))
+    rows.extend(_value_panel_for("MSFT_X", dates=[date(2024, 12, 1)], mcap=1500.0))
+    rows.extend(_value_panel_for("MAR_FY_X", dates=[date(2024, 12, 1)], mcap=2000.0))
+    rows.extend(_value_panel_for("MISSING_X", dates=[date(2025, 1, 1)], mcap=500.0))
+    rows.extend(_value_panel_for("SHORT_X", dates=[date(2025, 1, 1)], mcap=500.0))
+    rows.extend(_value_panel_for("SPARSE_X", dates=[date(2025, 1, 1)], mcap=500.0))
+    rows.extend(_value_panel_for("REUSE_X", dates=[date(2025, 1, 1)], mcap=500.0))
+    return pd.DataFrame(rows)
+
+
 # --- Week 1 / Week 2 ledger pipeline scaffolding ----------------------------
 # Lifted from tests/unit/test_week1_pipeline.py on Day 12 so test_ledger.py
 # can consume the same fixture. Polygon-free by construction: monkey-patches

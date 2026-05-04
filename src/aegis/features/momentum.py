@@ -22,19 +22,19 @@ raw=winsorized=zscore=NaN and ``valid_flag=False`` — see
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 import pandas as pd
 
-from aegis.features.base import Factor
+from aegis.features.base import Factor, FactorContext
 from aegis.features.operators import winsorize_cross_section, zscore_cross_section
 from aegis.utils.hashing import sha256_dataframe
 
 # Required columns on the input panel.
 _REQUIRED_COLUMNS: frozenset[str] = frozenset({"date", "ticker", "adj_close"})
 
-# Output column order — matches FactorObservation schema.
+# Output column order — matches FactorObservation schema (10 cols as of Day 17).
 _OUTPUT_COLUMNS: tuple[str, ...] = (
     "date",
     "ticker",
@@ -45,6 +45,7 @@ _OUTPUT_COLUMNS: tuple[str, ...] = (
     "valid_flag",
     "tradable_flag",
     "feature_snapshot_id",
+    "invalid_reason",
 )
 
 # Short-horizon skip (21 trading days ≈ 1 month) + total lookback (252 ≈ 1 year).
@@ -59,7 +60,9 @@ class Momentum12m1m(Factor):
     formula: ClassVar[str] = "log(P[t-21] / P[t-252])"
     lookback_days: ClassVar[int] = _LONG_LOOKBACK_DAYS
 
-    def compute(self, panel: pd.DataFrame) -> pd.DataFrame:
+    def compute(self, panel: pd.DataFrame, *, context: FactorContext | None = None) -> pd.DataFrame:
+        # context is unused — Momentum12m1m needs only adj_close.
+        del context
         missing = _REQUIRED_COLUMNS - set(panel.columns)
         if missing:
             raise ValueError(f"panel missing required columns for {self.name}: {sorted(missing)}")
@@ -87,14 +90,23 @@ class Momentum12m1m(Factor):
 
         # valid_flag: true iff all three values are finite (non-NaN, non-inf).
         values = working[["raw_value", "winsorized_value", "zscore_value"]]
-        working["valid_flag"] = np.isfinite(values.to_numpy()).all(axis=1)
+        valid = np.isfinite(values.to_numpy()).all(axis=1)
+        working["valid_flag"] = valid
         if "eligible_flag" in df.columns:
             eligible = df["eligible_flag"].fillna(False).astype(bool).to_numpy()
         else:
             eligible = np.ones(len(df), dtype=bool)
-        working["tradable_flag"] = working["valid_flag"].to_numpy() & eligible
+        working["tradable_flag"] = valid & eligible
+
+        # invalid_reason: bidirectional with valid_flag. mom_12_1's only failure
+        # mode is "history_ineligible" (insufficient lookback for 252-day shift).
+        working["invalid_reason"] = [
+            None if is_valid else "history_ineligible" for is_valid in valid
+        ]
 
         # feature_snapshot_id: deterministic hash of factor values and signal availability.
+        # invalid_reason is included so post-Day-17 hashes are stable but distinct
+        # from pre-Day-17 hashes (which is correct: schema changed = identity changed).
         snapshot = sha256_dataframe(
             working[
                 [
@@ -105,6 +117,7 @@ class Momentum12m1m(Factor):
                     "zscore_value",
                     "valid_flag",
                     "tradable_flag",
+                    "invalid_reason",
                 ]
             ]
         )
@@ -112,6 +125,19 @@ class Momentum12m1m(Factor):
         working["factor_name"] = self.name
 
         return working.loc[:, list(_OUTPUT_COLUMNS)].reset_index(drop=True)
+
+    def diagnostics(
+        self,
+        factor_out: pd.DataFrame,
+        *,
+        context: FactorContext | None = None,
+    ) -> dict[str, Any]:
+        del context  # mom_12_1 has no fundamentals lag stats
+        return {
+            "invalid_reason_counts": (
+                factor_out["invalid_reason"].fillna("__valid__").value_counts().to_dict()
+            ),
+        }
 
 
 __all__ = ["Momentum12m1m"]

@@ -23,6 +23,7 @@ import pandas as pd
 
 from aegis.config import AegisConfig
 from aegis.data.panel import build_panel
+from aegis.features.base import FactorContext, write_factor_parquet
 from aegis.features.momentum import Momentum12m1m
 from aegis.ledger import (
     open_ledger,
@@ -101,14 +102,17 @@ def _run_factor_slice(
 
     # 2. Compute 12-1 momentum (Day 5).
     factor = Momentum12m1m()
-    factor_out = factor.compute(panel)
+    context = FactorContext()
+    factor_out = factor.compute(panel, context=context)
     factor_valid_rows = int(factor_out["valid_flag"].sum())
     factor_tradable_rows = int(factor_out["tradable_flag"].sum())
 
-    # 3. Write factor Parquet alongside the panel.
+    # 3. Write factor Parquet alongside the panel, embedding per-factor
+    # diagnostics in pyarrow schema metadata (Day 17).
     factor_path = cfg.data.paths.processed / factor_basename
     factor_path.parent.mkdir(parents=True, exist_ok=True)
-    factor_out.to_parquet(factor_path, index=False)
+    diagnostics = factor.diagnostics(factor_out, context=context)
+    write_factor_parquet(factor_out, factor_path, diagnostics)
 
     # 4. Hash both artifacts (bytes on disk, post-write).
     panel_checksum = sha256_file(panel_path)

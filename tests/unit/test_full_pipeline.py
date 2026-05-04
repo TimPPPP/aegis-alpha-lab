@@ -353,10 +353,11 @@ def test_full_slice_synthetic_500_ticker_fixture_is_sensible(
     assert "REN" not in set(panel["ticker"])
     assert "FUT" not in set(panel["ticker"])
 
-    # Gate 3: factor shape (rows, 9) - FactorObservation columns plus tradability
+    # Gate 3: factor shape (rows, 10) - FactorObservation columns including
+    # tradability AND invalid_reason (Day 17 added the 10th column).
     factor = pd.read_parquet(result.factor_path)
-    assert factor.shape == (result.panel_rows, 9), (
-        f"factor shape {factor.shape} does not match (rows, 9)"
+    assert factor.shape == (result.panel_rows, 10), (
+        f"factor shape {factor.shape} does not match (rows, 10)"
     )
 
     # Gate 4: wall time < 30s on a dev laptop

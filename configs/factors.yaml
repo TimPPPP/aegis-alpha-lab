@@ -18,4 +18,27 @@
 # only lags, rolling moments, cross-sectional ranks, winsorize, and z-score
 # are permitted.
 
-factors: []  # populated during Module C implementation
+factors:
+  - name: mom_12_1
+    family: momentum
+    description: "Jegadeesh & Titman (1993) 12-month return skipping last month."
+    formula: "log(P[t-21] / P[t-252])"
+    inputs: [adj_close]
+    operators: [lag, log, ratio]
+    lookback_days: 252
+    neutralize: [style, industry]
+    winsorize_sigma: 3.0
+    horizon_days: 21
+    reference_ic: 0.04
+
+  - name: earnings_yield
+    family: value
+    description: "Trailing-twelve-months net income over current market cap (E/P)."
+    formula: "ttm_net_income / mcap"
+    inputs: [net_income, mcap]
+    operators: [ttm, ratio]
+    lookback_days: 365
+    neutralize: [style, industry]
+    winsorize_sigma: 3.0
+    horizon_days: 21
+    reference_ic: 0.03
