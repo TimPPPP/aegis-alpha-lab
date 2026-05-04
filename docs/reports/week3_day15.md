@@ -8,8 +8,8 @@
 
 | Metric | Before | After |
 |---|---|---|
-| pytest -m "not polygon" | 144 passed, 4 xfailed | **150 passed, 4 xfailed** (+6 schema tests) |
-| pytest -m polygon | 6 (auto-skip without key) | **6 + 3 skipped** (3 new fundamentals integration tests; clean skip message naming the missing entitlements) |
+| pytest -m "not polygon" | 144 passed, 4 xfailed | **157 passed, 4 xfailed** (+7 schema tests, +6 scraper-helper tests) |
+| pytest -m polygon | 6 (auto-skip without key) | **1 passed, 3 skipped, 1 xfailed** (fundamentals tests skip cleanly while entitlement is missing) |
 | Source `.py` files in `src/aegis/` | 26 | 26 (schema additions in-place; no new modules) |
 | Scripts | 5 | 6 (`fetch_polygon_fundamentals.py`) |
 | `content_hash()` | `b8f31b99…e6bc` | `b8f31b99…e6bc` (unchanged — schema/script land outside `_RESEARCH_IDENTITY_FIELDS`, as expected) |
@@ -42,7 +42,7 @@ This confirmed the locked-plan suspicion (Stocks Starter is not enough for v1 fi
 
 ### 2. `FundamentalsRow` Pydantic schema
 
-[`src/aegis/data/schema.py`](src/aegis/data/schema.py#L242-L334) — appends a frozen Pydantic row contract for one merged financial-statement record. PIT discipline encoded as `@model_validator`s:
+[`src/aegis/data/schema.py`](../../src/aegis/data/schema.py#L242-L334) — appends a frozen Pydantic row contract for one merged financial-statement record. PIT discipline encoded as `@model_validator`s:
 
 - `_filing_not_before_period_end` — `filing_date >= period_end_date` (filings always land on or after the period close they describe).
 - `_quarter_consistent_with_kind` — `period_kind == "quarterly"` ↔ `fiscal_quarter ∈ {1,2,3,4}`; annual/TTM rows have `fiscal_quarter=None`.
@@ -53,7 +53,7 @@ The 9 numeric fields are all `float | None` (Polygon backfills sparse data; we d
 
 ### 3. Schema tests
 
-[`tests/unit/test_schema.py`](tests/unit/test_schema.py#L145-L213) — 6 new tests, all green:
+[`tests/unit/test_schema.py`](../../tests/unit/test_schema.py#L145-L233) — 7 new tests, all green:
 
 - `test_fundamentals_row_accepts_valid_quarterly` — happy path with realistic Apple Q4-2024 numbers.
 - `test_fundamentals_row_accepts_annual_with_no_quarter` — annual rows omit `fiscal_quarter`.
@@ -61,10 +61,15 @@ The 9 numeric fields are all `float | None` (Polygon backfills sparse data; we d
 - `test_fundamentals_row_rejects_quarterly_without_fiscal_quarter` — quarterly must specify Q1-4.
 - `test_fundamentals_row_rejects_annual_with_fiscal_quarter` — annual must NOT specify a quarter.
 - `test_fundamentals_row_is_frozen` — assignment after construction raises `ValidationError`.
+- `test_fundamentals_row_accepts_parquet_round_trip_shapes` — guards pandas/pyarrow read-back shapes for nullable integers and list-like `source_endpoints`.
+
+### 3a. Polygon-free scraper unit tests
+
+[`tests/unit/test_polygon_fundamentals_scraper.py`](../../tests/unit/test_polygon_fundamentals_scraper.py) — 6 unit tests cover helper behavior that cannot depend on live Polygon entitlement: CIK formatting, primary-ticker binding, endpoint merge semantics, limited-smoke validation, full-snapshot floor validation, and generated parquet round-trip validation.
 
 ### 4. The scraper
 
-[`scripts/fetch_polygon_fundamentals.py`](scripts/fetch_polygon_fundamentals.py) — 502 lines including docstrings. Mirrors the [`fetch_polygon_ticker_reference.py`](scripts/fetch_polygon_ticker_reference.py) structure (rate-limit constant, dotenv load, `_validate`, `_write_meta`, tolerant per-entity errors, `sha256_file` of the parquet sibling).
+[`scripts/fetch_polygon_fundamentals.py`](../../scripts/fetch_polygon_fundamentals.py) — ~500 lines including docstrings. Mirrors the [`fetch_polygon_ticker_reference.py`](../../scripts/fetch_polygon_ticker_reference.py) structure (rate-limit constant, dotenv load, `_validate`, `_write_meta`, tolerant per-entity errors, `sha256_file` of the parquet sibling).
 
 Key components:
 
@@ -78,7 +83,7 @@ Key components:
 | `_project_row(raw, *, field_map, primary_ticker, endpoint_tag)` | Translates one Polygon response object into a partial FundamentalsRow dict via the per-endpoint field map. Handles multi-class tickers (binds to `primary_ticker` when it's in the response's `tickers` list, else falls back to `tickers[0]`). |
 | `_merge_three_endpoints(income, balance, cashflow)` | Merges by `(cik\|ticker, fiscal_year, fiscal_quarter, period_kind, period_end_date)`. `source_endpoints` accumulates the contributing tags. `filing_date` takes the LATEST across endpoints (rare 10-Q amendments file separately). |
 | `_run_full_fetch(client, *, universe, lookback_years)` | Iterate every entity × 3 endpoints with sleep pacing; record coverage failures. |
-| `_validate(df)` | Column shape, non-null required keys, sanity floors (≥10,000 rows, ≥500 unique tickers). |
+| `_validate(df, enforce_sanity_floors=True)` | Column shape + non-null required keys always; full-snapshot sanity floors (≥10,000 rows, ≥500 unique tickers) only when not running a limited smoke fetch. |
 | `_write_meta(...)` | JSON sidecar with source URLs, fetched_at_utc, scraper_git_sha, parquet_sha256, row_count, unique_ticker_count, api_calls_made, **`entitlement_preflight_result`** (so the snapshot's provenance includes the entitlement state at fetch time), `coverage_failed_count`, `sample_coverage_failed`. |
 
 CLI:
@@ -104,7 +109,7 @@ exit_code=2
 
 ### 5. Integration tests
 
-[`tests/integration/test_polygon_fundamentals.py`](tests/integration/test_polygon_fundamentals.py) — 3 polygon-marked tests, all skip cleanly today and become live tests once entitlement lands:
+[`tests/integration/test_polygon_fundamentals.py`](../../tests/integration/test_polygon_fundamentals.py) — 3 polygon-marked tests, all skip cleanly today and become live tests once entitlement lands:
 
 - `test_polygon_fundamentals_entitlement_preflight` — probes each endpoint; **skips** (does not fail) when forbidden so users on Starter don't see CI breakage.
 - `test_polygon_income_statements_schema_round_trip` — pulls one AAPL row, projects it, asserts shared keys are populated and all income-statement field-map outputs are present.
@@ -114,38 +119,38 @@ The tests deliberately import the scraper module from `scripts/` (added to `sys.
 
 ### 6. `.gitignore`
 
-[`.gitignore`](.gitignore#L43-L44) — added `/data/reference/fundamentals.meta.json` next to the existing `ticker_metadata.meta.json` rule. The pattern: parquet sibling is gitignored via `*.parquet`, so the sidecar is gitignored too (no point checking in provenance for a file that isn't checked in).
+[`.gitignore`](../../.gitignore#L43-L44) — added `/data/reference/fundamentals.meta.json` next to the existing `ticker_metadata.meta.json` rule. The pattern: parquet sibling is gitignored via `*.parquet`, so the sidecar is gitignored too (no point checking in provenance for a file that isn't checked in).
 
 ### 7. Plan revisions captured
 
-[`docs/plans/week3.md`](docs/plans/week3.md) — the user's earlier in-IDE plan revisions (v1 endpoint pivot, entitlement preflight gate, FactorObservation 10 columns, FactorContext, factors.yaml moves the hash because both `mom_12_1` and `earnings_yield` land at once) were still uncommitted; they landed in the same commit as the Day 15a code so plan and implementation are now synchronized.
+[`docs/plans/week3.md`](../plans/week3.md) — the user's earlier in-IDE plan revisions (v1 endpoint pivot, entitlement preflight gate, FactorObservation 10 columns, FactorContext, factors.yaml moves the hash because both `mom_12_1` and `earnings_yield` land at once) were still uncommitted; they landed in the same commit as the Day 15a code so plan and implementation are now synchronized.
 
 Added a Day 15a status update at the top of the Day 15 section recording the entitlement-forbidden branch and the live preflight result.
 
 ## Quality gates
 
 ```
-$ uv run pytest -m "not polygon" -q
-150 passed, 5 deselected, 4 xfailed in 10.66s
+$ .\.venv\Scripts\python.exe -m pytest -m "not polygon" -q
+157 passed, 5 deselected, 4 xfailed in 10.31s
 
-$ uv run pytest -m polygon -q
-3 skipped, ... in 0.83s
+$ .\.venv\Scripts\python.exe -m pytest -m polygon -q
+1 passed, 3 skipped, 161 deselected, 1 xfailed in 101.50s
 [skip messages: "Polygon key lacks v1 financials entitlement (forbidden:
 ['income_statements', 'balance_sheets', 'cash_flow_statements'])."]
 
-$ uv run ruff check src tests scripts
+$ .\.venv\Scripts\ruff.exe check src tests scripts
 All checks passed!
 
-$ uv run ruff format --check src tests scripts
-59 files already formatted
+$ .\.venv\Scripts\ruff.exe format --check src tests scripts
+60 files already formatted
 
-$ uv run mypy src
+$ .\.venv\Scripts\mypy.exe src
 Success: no issues found in 30 source files
 
-$ uv run pre-commit run --all-files
+$ .\.venv\Scripts\pre-commit.exe run --all-files
 [all hooks Passed]
 
-$ uv run python -c "from aegis.config import load_all; print(load_all().content_hash())"
+$ .\.venv\Scripts\python.exe -c "from aegis.config import load_all; print(load_all().content_hash())"
 b8f31b996bcb4e655f4195590be006607884b89106cc73542de0f255e408e6bc
 ```
 
@@ -176,7 +181,7 @@ b8f31b996bcb4e655f4195590be006607884b89106cc73542de0f255e408e6bc
 | Item | Reason | Unblocked by |
 |---|---|---|
 | Day 15b — entitlement preflight commit | The code-only commit subsumes it (no separate "preflight passed" commit needed since the result is forbidden) | n/a |
-| Day 15c — generated `data/reference/fundamentals.parquet` + `fundamentals.meta.json` | Entitlement forbidden | Polygon plan upgrade to Financials & Ratios Expansion (~$199/mo add-on) or Stocks Advanced (~$1,599/mo) |
+| Day 15c — generated `data/reference/fundamentals.parquet` + `fundamentals.meta.json` | Entitlement forbidden | Polygon/Massive Stocks Advanced ($199/mo individual plan, includes Financials & Ratios) or a business Financials & Ratios option if needed for business use |
 | Day 16 — `src/aegis/data/fundamentals.py` (PIT lookup helpers) | Helpers consume the parquet that Day 15c would generate; the schema is locked, so Day 16 helpers can be coded against the locked schema and tested with engineered fixtures (which is how the locked plan specified them anyway). **Day 16 is therefore NOT blocked** — fixture-driven tests will exercise it. | Already unblocked. |
 | Day 17 — `EarningsYield(Factor)` end-to-end | Computes against the parquet via Day 16 helpers; same story — engineered fixtures suffice for testing. Live full-slice run on Day 20 is what really needs the parquet. | Day 16 lands first; live run waits on entitlement. |
 | Day 20 — live multi-factor full-slice (`aegis backtest full --factors mom_12_1,earnings_yield`) | Requires real fundamentals.parquet | Polygon plan upgrade |
@@ -187,11 +192,11 @@ The implication: **Days 16-19 can proceed using engineered fixtures** for the fu
 
 Two options for unblocking the live data path:
 
-1. **Polygon Financials & Ratios Expansion add-on** — adds the v1 financial statement endpoints to an existing Stocks Starter plan. Cost: needs verification on Polygon's pricing page (their UI shifts; the message string says "https://massive.com/pricing" which suggests they've rebranded). Probable cost: ~$50-200/mo on top of Starter's $29.
+1. **Stocks Advanced individual plan** — current public [Polygon pricing](https://polygon.io/pricing) lists Stocks Advanced at **$199/mo** and includes Financials & Ratios. This is the cleanest V1 path if the account qualifies for non-pro individual use.
 
-2. **Stocks Advanced** — bundles Financials & Ratios with much higher rate limits + extended history. Cost: ~$1,599/mo. Overkill for V1 unless we plan to expand the fundamentals window beyond 5 years or cross-asset.
+2. **Business Financials & Ratios / Stocks Business** — current public [business pricing](https://polygon.io/business/) lists Financials & Ratios as a business add-on at **$699/mo**, and Stocks Business at **$1,999/mo** with Financials & Ratios included. Use this only if the account needs business-use licensing.
 
-Either way, the code is ready: a 1-line plan upgrade unlocks `uv run python scripts/fetch_polygon_fundamentals.py` (~20-30 min wall time on Starter pacing, ~5-7 min on Advanced) and Day 15c lands as a single commit.
+Either way, the code is ready: a plan upgrade unlocks `uv run python scripts/fetch_polygon_fundamentals.py` and Day 15c lands as a single commit.
 
 ## Files changed
 
@@ -205,7 +210,17 @@ tests/unit/test_schema.py                        |  70 +++++++++-
 6 files changed, 973 insertions(+), 53 deletions(-)
 ```
 
-Commit `89d964e` on `main`, pushed to `origin/main`.
+Original implementation commit `89d964e` on `main` was pushed to `origin/main`.
+
+Post-review hardening follow-up:
+
+```
+docs/reports/week3_day15.md
+scripts/fetch_polygon_fundamentals.py
+src/aegis/data/schema.py
+tests/unit/test_schema.py
+tests/unit/test_polygon_fundamentals_scraper.py (new)
+```
 
 ## Next deliverable
 

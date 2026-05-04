@@ -19,9 +19,11 @@ code — we filter to ``"CS"`` (common stock) only per spec §7. CRSP's
 from __future__ import annotations
 
 from datetime import date
+from math import isnan
+from numbers import Integral, Real
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ExchangeCode = Literal["NYSE", "AMEX", "NASDAQ"]
 
@@ -299,6 +301,38 @@ class FundamentalsRow(_FrozenRow):
     operating_cash_flow: float | None = None
 
     source_endpoints: tuple[FinancialEndpoint, ...] = Field(default=())
+
+    @field_validator("cik", "fiscal_year", "fiscal_quarter", mode="before")
+    @classmethod
+    def _coerce_optional_int_from_parquet(cls, value: object) -> object:
+        """Accept pandas/pyarrow nullable integer shapes after parquet round-trip."""
+        if value is None or value.__class__.__name__ in {"NAType", "NaTType"}:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, Integral):
+            return int(value)
+        if isinstance(value, Real):
+            as_float = float(value)
+            if isnan(as_float):
+                return None
+            if as_float.is_integer():
+                return int(as_float)
+        return value
+
+    @field_validator("source_endpoints", mode="before")
+    @classmethod
+    def _coerce_source_endpoints_from_parquet(cls, value: object) -> object:
+        """PyArrow returns list-like parquet cells as ndarray/list, not tuple."""
+        if value is None or value.__class__.__name__ in {"NAType", "NaTType"}:
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        if isinstance(value, list | tuple | set):
+            return tuple(value)
+        return value
 
     @model_validator(mode="after")
     def _filing_not_before_period_end(self) -> FundamentalsRow:

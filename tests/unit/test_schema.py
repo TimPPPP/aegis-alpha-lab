@@ -13,8 +13,10 @@ CRSP's permno / integer share_code are gone as of the 2026-04-23 pivot.
 from __future__ import annotations
 
 from datetime import date, datetime
+from io import BytesIO
 from uuid import uuid4
 
+import pandas as pd
 import pytest
 from pydantic import ValidationError
 
@@ -208,6 +210,27 @@ def test_fundamentals_row_is_frozen() -> None:
     row = _good_fundamentals_row()
     with pytest.raises(ValidationError):
         row.revenues = 0.0  # type: ignore[misc]
+
+
+def test_fundamentals_row_accepts_parquet_round_trip_shapes() -> None:
+    rows = [
+        _good_fundamentals_row().model_dump(),
+        _good_fundamentals_row(period_kind="annual", fiscal_quarter=None).model_dump(),
+    ]
+    buffer = BytesIO()
+    pd.DataFrame(rows).to_parquet(buffer, index=False)
+
+    buffer.seek(0)
+    read_back = pd.read_parquet(buffer)
+    validated = [FundamentalsRow(**record) for record in read_back.to_dict("records")]
+
+    assert validated[0].fiscal_quarter == 4
+    assert validated[1].fiscal_quarter is None
+    assert validated[0].source_endpoints == (
+        "income_statements",
+        "balance_sheets",
+        "cash_flow_statements",
+    )
 
 
 # --- FactorObservation -------------------------------------------------------

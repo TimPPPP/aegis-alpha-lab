@@ -336,12 +336,14 @@ def _merge_three_endpoints(
     return list(merged.values())
 
 
-def _validate(df: pd.DataFrame) -> None:
+def _validate(df: pd.DataFrame, *, enforce_sanity_floors: bool = True) -> None:
     if tuple(df.columns) != EXPECTED_COLUMNS:
         raise RuntimeError(f"column mismatch: {tuple(df.columns)} != {EXPECTED_COLUMNS}")
     for col in ("ticker", "filing_date", "period_end_date", "period_kind"):
         if df[col].isna().any():
             raise RuntimeError(f"found rows with null {col}")
+    if not enforce_sanity_floors:
+        return
     if len(df) < 10_000:
         raise RuntimeError(f"sanity floor: expected >=10,000 rows, got {len(df)}")
     unique_tickers = int(df["ticker"].nunique())
@@ -542,7 +544,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     df = pd.DataFrame(rows, columns=list(EXPECTED_COLUMNS))
     df = df.dropna(subset=["ticker", "filing_date", "period_end_date", "period_kind"])
     df = df.sort_values(["ticker", "filing_date"]).reset_index(drop=True)
-    _validate(df)
+    _validate(df, enforce_sanity_floors=args.limit_tickers is None)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     df.to_parquet(PARQUET_PATH, index=False)
