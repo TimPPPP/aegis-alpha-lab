@@ -57,24 +57,29 @@ The proposal's foundational principles + relevant §-sections that touch Week 3:
 - `data/reference/fundamentals.parquet` (gitignored, regenerable). ~640 tickers × ~20 quarterly reports ≈ ~12,800 rows.
 - `data/reference/fundamentals.meta.json` provenance sidecar: source URL, fetched_at_utc, scraper_git_sha, parquet_sha256, row_count, coverage_failed (list of tickers that returned no fundamentals), api_calls_made.
 
-**Acceptance:** parquet exists, ≥10,000 rows, ≥640 unique tickers covered, meta sidecar's `parquet_sha256` matches on-disk file.
+**Acceptance:** parquet exists, **attempt fundamentals fetch for every ticker in `sp500_membership.csv`**; require ≥10,000 rows AND ≥500 unique tickers with ≥1 PIT-eligible report (allowing for delisted / acquisition-resolved names that no longer have queryable Polygon fundamentals). All tickers attempted but skipped are listed in `coverage_failed` in the meta sidecar (with reason). Meta sidecar's `parquet_sha256` matches on-disk file.
 
 ### Day 16 — PIT lookup helpers
 
 **Build** — `src/aegis/data/fundamentals.py`:
 - `load_fundamentals(path) -> pd.DataFrame` — column-validated read.
 - `fundamentals_at(ticker, date, df) -> pd.Series | None` — latest row whose `filing_date < date`. Returns None if no PIT-eligible report exists for that ticker.
-- `ttm_at(ticker, date, df, field) -> float | None` — sum of last 4 *quarterly* values of `field` whose `filing_date < date`. Returns None if fewer than 4 quarterly reports are PIT-eligible.
+- `ttm_at(ticker, date, df, field) -> float | None` — sum of last 4 *quarterly* values of `field` whose `filing_date < date`. Returns None if fewer than 4 quarterly reports are PIT-eligible OR if no fundamentals exist at all for the ticker.
+- `ttm_with_status(ticker, date, df, field) -> tuple[float | None, str | None]` — same computation as `ttm_at` but disambiguates the None case. Returns `(value, None)` when valid, `(None, "missing_fundamentals")` when the ticker has zero PIT-eligible reports, `(None, "insufficient_quarters")` when 1–3 PIT-eligible quarterly reports exist but fewer than 4. This is the helper `EarningsYield.compute` uses to populate `invalid_reason` directly without re-walking the frame.
 - `coverage_window(start, end, df) -> pd.DataFrame` — long-format `(date, ticker, has_pit_fundamentals)` over a date range; useful for diagnostics.
-- `fundamental_lag_days(ticker, date, df) -> int | None` — `(date - filing_date).days` for the row `fundamentals_at` would return.
+- `latest_filing_lag_days(ticker, date, df) -> int | None` — `(date - filing_date).days` for the most recent PIT-eligible filing (the row `fundamentals_at` would return). None if no PIT-eligible row exists.
+- `oldest_ttm_component_lag_days(ticker, date, df) -> int | None` — `(date - filing_date).days` for the *oldest* of the 4 quarterlies summed by `ttm_at`. Captures TTM staleness (vs. just latest-filing staleness). None if `ttm_at` would return None.
 
-**Tests** — `tests/unit/test_fundamentals.py` (~6 tests):
+**Tests** — `tests/unit/test_fundamentals.py` (~9 tests):
 - `test_fundamentals_at_returns_latest_filed_before_date`
 - `test_fundamentals_at_excludes_period_of_report_date_after_filing_date` (PIT discipline regression — engineered case where filing_date is mid-quarter and period_of_report_date is later)
 - `test_fundamentals_at_is_filtration_measurable` (truncation-stability; mirrors the σ-algebra patterns from Day 8/9)
 - `test_ttm_at_sums_exactly_four_quarterly_reports`
 - `test_ttm_at_returns_none_when_fewer_than_four_quarters_pit_available`
 - `test_ttm_at_handles_fiscal_year_boundary` (engineered fixture: ticker with FY ending in March; assert Q1 of new fiscal year + Q4-Q3-Q2 of old fiscal year produce a sensible TTM)
+- `test_ttm_with_status_distinguishes_missing_from_insufficient` — ticker with zero PIT-eligible reports returns `(None, "missing_fundamentals")`; ticker with 2 PIT-eligible quarterlies returns `(None, "insufficient_quarters")`; ticker with 4+ returns `(value, None)`.
+- `test_latest_filing_lag_days_basic` — engineered ticker filed Day 30 of quarter end; assert at date Day 90 the lag is 60 days.
+- `test_oldest_ttm_component_lag_days_returns_age_of_oldest_quarter` — TTM summed from Q1-Q4 spanning ~365 days; oldest component lag ≈ 365.
 
 ## Workstream B — Sector enrichment (Day 18, **isolated commit**)
 
@@ -110,7 +115,7 @@ This is one mechanical refactor commit, landed **before** the multi-factor refac
 - `test_sector_for_sic_known_codes` — 10 representative codes map correctly.
 - `test_sector_for_sic_none_returns_unknown_unknown`.
 - `test_sector_for_sic_unmapped_prefix_returns_unknown_unknown`.
-- `test_sic_mapping_is_exhaustive_over_ticker_metadata` — every non-null SIC in `ticker_metadata.parquet` maps to a non-Unknown sector_proxy. (Skipif parquet not present.)
+- `test_sic_mapping_covers_at_least_95_pct_of_observed_sics` — at least 95% of non-null `sic_code` values in `ticker_metadata.parquet` map to a non-Unknown sector_proxy. Any unmapped prefix is logged (with the prefix and the ticker count it would have covered) so future passes can extend the table without surprise. (Skipif parquet not present.)
 - `test_panel_sector_columns_populated_from_metadata` — end-to-end: pipeline_fixture's panel has sector_proxy/industry_proxy populated from the ticker_metadata join.
 
 **Acceptance:** all existing tests pass after the rename. No `gics_*` references remain in `src/aegis/` or `tests/`. `_PANEL_COLUMNS` still has 15 columns, just renamed.
@@ -125,7 +130,7 @@ This is one mechanical refactor commit, landed **before** the multi-factor refac
 - `lookback_days = 365` (need 4 quarters of fundamentals)
 - `compute(panel, fundamentals) -> pd.DataFrame` returning `FactorObservation` rows.
 - Per-row computation: for each `(date, ticker)`:
-  1. `ttm_ni = ttm_at(ticker, date, fundamentals, "net_income")` → `invalid_reason="missing_fundamentals"` if None or `invalid_reason="insufficient_quarters"` if fewer than 4 PIT quarterlies.
+  1. `ttm_ni, ttm_status = ttm_with_status(ticker, date, fundamentals, "net_income")` — if `ttm_status` is non-None, set `invalid_reason = ttm_status` (`"missing_fundamentals"` or `"insufficient_quarters"`) and skip the rest.
   2. `mcap = panel.mcap` — if None or ≤0, `invalid_reason="invalid_denominator"`.
   3. `raw = ttm_ni / mcap` — if NaN or inf, `invalid_reason="raw_factor_nan"`.
   4. Cross-sectional 1%/99% winsorize per date → `winsorized_value`.
@@ -139,7 +144,7 @@ This is one mechanical refactor commit, landed **before** the multi-factor refac
 - Day 13 acceptance test threshold updates: `factor.shape == (rows, 9)`.
 
 **Per-factor diagnostics in parquet metadata** — `Factor.diagnostics(factor_out, fundamentals_or_none) -> dict`:
-- For `earnings_yield`: median / p90 / max `fundamental_lag_days` across all PIT-eligible rows; count by `invalid_reason`.
+- For `earnings_yield`: across all PIT-eligible rows record both **latest-filing-lag** (median / p90 / max of `latest_filing_lag_days`) AND **TTM-component-lag** (median / p90 / max of `oldest_ttm_component_lag_days`). The TTM lag answers "how stale is the *oldest* quarterly summed into this TTM" — typically ~365 days for fresh fundamentals, useful for catching restated-quarter scenarios. Also: count by `invalid_reason`.
 - For `mom_12_1`: just the `invalid_reason` count by category (no fundamentals so no lag stats).
 - Written to parquet via `pyarrow.Table.replace_schema_metadata({b"factor_diagnostics": json.dumps(diag).encode()})`.
 - A small helper `read_factor_diagnostics(parquet_path) -> dict` extracts them. Useful for Week 3 report's diagnostics section.
@@ -181,7 +186,7 @@ Existing 3 Day-13 tests update to assert the new (1, N, 2N) ledger shape and the
 **Build / verify**
 - `aegis backtest full --date 2025-06-15 --factors mom_12_1,earnings_yield` end-to-end against Polygon Starter.
 - ~503 S&P members × ~458 trading days × 2 factors. Wall time ~22 min for the panel pull (one-time cost; factor compute is sub-second per factor).
-- New ledger layout: 1 experiment + 2 candidates + 4 artifacts (1 panel registered to each of 2 candidates + 2 factor parquets).
+- New ledger layout: 1 experiment + 2 candidates + **2N=4 artifact rows** in `artifacts` (each candidate registers its own `panel` row pointing at the shared panel file with the same sha + its own `factor` row pointing at its factor-specific parquet). On disk: 1 panel parquet + 2 factor parquets, but the artifact-row count is 2N because every candidate's verify-mode replay must self-contain its panel reference.
 - `aegis ledger replay <candidate_id>` for each candidate independently — both should report `all_ok=True` (under the new `content_hash`).
 
 **Acceptance**
@@ -210,7 +215,7 @@ Existing 3 Day-13 tests update to assert the new (1, N, 2N) ledger shape and the
 | `scripts/fetch_polygon_fundamentals.py` (~200 lines) | 15 | Polygon vx fundamentals scraper, ticker-by-ticker, tolerant errors |
 | `data/reference/fundamentals.parquet` | 15 | Gitignored cache (`.parquet` rule) |
 | `data/reference/fundamentals.meta.json` | 15 | Gitignored provenance sidecar (per `/data/*` ignore rule) |
-| `src/aegis/data/fundamentals.py` (~120 lines) | 16 | `load_fundamentals`, `fundamentals_at`, `ttm_at`, `coverage_window`, `fundamental_lag_days` |
+| `src/aegis/data/fundamentals.py` (~140 lines) | 16 | `load_fundamentals`, `fundamentals_at`, `ttm_at`, `ttm_with_status`, `coverage_window`, `latest_filing_lag_days`, `oldest_ttm_component_lag_days` |
 | `src/aegis/features/value.py` (~120 lines) | 17 | `EarningsYield(Factor)` (Week 4 will add `BookYield` / `SalesYield` / `CashFlowYield` / `ValueComposite` here) |
 | `data/reference/sic_to_sector_proxy.csv` | 18 | Hand-curated ~10-bucket SIC → sector mapping (checked in) |
 | `src/aegis/data/sector_proxy.py` (~60 lines) | 18 | `sector_for_sic` |
@@ -301,12 +306,12 @@ End-of-week (must all pass):
 
 ## Definition of done
 
-Must-land (Week 3 succeeds with all eleven):
+Must-land (Week 3 succeeds when all items below are complete):
 
-- [ ] `data/reference/fundamentals.parquet` generated, ≥10,000 rows, ≥640 unique tickers (gitignored).
+- [ ] `data/reference/fundamentals.parquet` generated, **fetch attempted for every ticker in `sp500_membership.csv`**; ≥10,000 rows AND ≥500 unique tickers with ≥1 PIT-eligible report. Tickers that returned no fundamentals are listed (with reason) in `coverage_failed`. Gitignored.
 - [ ] `data/reference/fundamentals.meta.json` provenance sidecar (gitignored), `parquet_sha256` matches.
-- [ ] `data/reference/sic_to_sector_proxy.csv` checked in, 10-bucket mapping covers every observed SIC code in `ticker_metadata.parquet`.
-- [ ] `src/aegis/data/fundamentals.py` exposes `load_fundamentals`, `fundamentals_at`, `ttm_at`, `coverage_window`, `fundamental_lag_days`.
+- [ ] `data/reference/sic_to_sector_proxy.csv` checked in, 10-bucket mapping covers ≥95% of non-null SIC codes in `ticker_metadata.parquet`. Any unmapped prefix logged (prefix + ticker count) so future passes can extend without surprise.
+- [ ] `src/aegis/data/fundamentals.py` exposes `load_fundamentals`, `fundamentals_at`, `ttm_at`, `ttm_with_status`, `coverage_window`, `latest_filing_lag_days`, `oldest_ttm_component_lag_days`.
 - [ ] `src/aegis/data/sector_proxy.py` exposes `sector_for_sic`.
 - [ ] `src/aegis/features/value.py::EarningsYield` exposes `name`, `formula`, `lookback_days`, `compute`, `diagnostics`.
 - [ ] Panel columns renamed: `gics_sector` → `sector_proxy`, `gics_industry` → `industry_proxy`. No `gics_*` references remain in `src/aegis/` or `tests/`.
