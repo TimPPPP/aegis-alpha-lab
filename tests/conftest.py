@@ -13,7 +13,9 @@ user to ``source .env`` manually. Already-set env vars are never overridden.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -239,6 +241,272 @@ def stock_daily_panel() -> pd.DataFrame:
     )
 
     return pd.concat(parts, ignore_index=True)
+
+
+# --- Week 3 Day 16 fundamentals fixture --------------------------------------
+#
+# An engineered ~33-row fundamentals frame, shape-aligned with the scraper's
+# EXPECTED_COLUMNS. Encodes 5 distinct cases used by tests/unit/test_fundamentals.py
+# AND tests/unit/test_earnings_yield.py (Day 17). Polygon-free by construction.
+#
+# Cases:
+#   AAPL_X    — 8 normal quarterlies + 1 annual + 1 TTM (booby trap so
+#               ttm_at correctly filters period_kind=='quarterly' only).
+#               Sep FY-end (Q1 ends Dec, Q2 Mar, Q3 Jun, Q4 Sep).
+#               revenues   = 100, 200, 300, 400, 500, 600, 700, 800
+#               net_income = 10, 20, 30, 40, 50, 60, 70, 80
+#   MSFT_X    — 8 quarterlies + 1 RESTATEMENT of FY24-Q3 (revenues 300 -> 350,
+#               filed 30 days later). De-dupe by fiscal period must keep
+#               the later filing.
+#               Jun FY-end (Q1 Sep, Q2 Dec, Q3 Mar, Q4 Jun).
+#   MAR_FY_X  — 8 quarterlies, March FY-end. Designed so that at as_of=2024-12-01
+#               the latest 4 PIT-eligible quarters span FY24 and FY25
+#               (FY24-Q3, FY24-Q4, FY25-Q1, FY25-Q2).
+#   SHORT_X   — 2 quarterlies only -> ttm_at returns None (insufficient_quarters).
+#   SPARSE_X  — 4 quarterlies all PIT-eligible, but Q2 has revenues=None
+#               -> ttm_with_status returns missing_field_value.
+#   MISSING_X — appears nowhere in the fixture -> missing_fundamentals.
+
+_FUND_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "cik",
+    "filing_date",
+    "period_end_date",
+    "fiscal_year",
+    "fiscal_quarter",
+    "period_kind",
+    "revenues",
+    "net_income",
+    "eps_basic",
+    "eps_diluted",
+    "weighted_avg_shares_basic",
+    "weighted_avg_shares_diluted",
+    "common_equity",
+    "total_assets",
+    "operating_cash_flow",
+    "source_endpoints",
+)
+
+
+def _fund_row(
+    ticker: str,
+    cik: int,
+    *,
+    filing_date: date,
+    period_end_date: date,
+    fiscal_year: int | None,
+    fiscal_quarter: int | None,
+    period_kind: str,
+    revenues: float | None = None,
+    net_income: float | None = None,
+) -> dict[str, Any]:
+    return {
+        "ticker": ticker,
+        "cik": cik,
+        "filing_date": filing_date,
+        "period_end_date": period_end_date,
+        "fiscal_year": fiscal_year,
+        "fiscal_quarter": fiscal_quarter,
+        "period_kind": period_kind,
+        "revenues": revenues,
+        "net_income": net_income,
+        "eps_basic": None,
+        "eps_diluted": None,
+        "weighted_avg_shares_basic": None,
+        "weighted_avg_shares_diluted": None,
+        "common_equity": None,
+        "total_assets": None,
+        "operating_cash_flow": None,
+        "source_endpoints": ("income_statements",),
+    }
+
+
+def _aapl_x_rows() -> list[dict[str, Any]]:
+    """8 quarterlies + 1 annual (FY24) + 1 TTM (booby trap)."""
+    quarters = [
+        # (fy, fq, period_end,           filing_date,           rev,  ni)
+        (2024, 1, date(2023, 12, 30), date(2024, 1, 25), 100, 10),
+        (2024, 2, date(2024, 3, 30), date(2024, 4, 25), 200, 20),
+        (2024, 3, date(2024, 6, 29), date(2024, 7, 25), 300, 30),
+        (2024, 4, date(2024, 9, 28), date(2024, 10, 25), 400, 40),
+        (2025, 1, date(2024, 12, 28), date(2025, 1, 25), 500, 50),
+        (2025, 2, date(2025, 3, 29), date(2025, 4, 25), 600, 60),
+        (2025, 3, date(2025, 6, 28), date(2025, 7, 25), 700, 70),
+        (2025, 4, date(2025, 9, 27), date(2025, 10, 25), 800, 80),
+    ]
+    rows = [
+        _fund_row(
+            "AAPL_X",
+            320193,
+            fiscal_year=fy,
+            fiscal_quarter=fq,
+            filing_date=fd,
+            period_end_date=pe,
+            period_kind="quarterly",
+            revenues=float(rev),
+            net_income=float(ni),
+        )
+        for (fy, fq, pe, fd, rev, ni) in quarters
+    ]
+    # FY24 annual = sum of FY24 Q1..Q4 quarterlies = 1000 / 100
+    rows.append(
+        _fund_row(
+            "AAPL_X",
+            320193,
+            fiscal_year=2024,
+            fiscal_quarter=None,
+            filing_date=date(2024, 11, 1),
+            period_end_date=date(2024, 9, 28),
+            period_kind="annual",
+            revenues=1000.0,
+            net_income=100.0,
+        )
+    )
+    # TTM booby trap — must be ignored by ttm_at.
+    rows.append(
+        _fund_row(
+            "AAPL_X",
+            320193,
+            fiscal_year=2025,
+            fiscal_quarter=None,
+            filing_date=date(2025, 5, 1),
+            period_end_date=date(2025, 3, 29),
+            period_kind="trailing_twelve_months",
+            revenues=99999.0,  # if ever summed in, the test assertion will scream
+            net_income=99999.0,
+        )
+    )
+    return rows
+
+
+def _msft_x_rows() -> list[dict[str, Any]]:
+    """8 quarterlies (Jun FY-end) + 1 restatement of FY24-Q3."""
+    quarters = [
+        (2024, 1, date(2023, 9, 30), date(2023, 10, 25), 100, 10),
+        (2024, 2, date(2023, 12, 31), date(2024, 1, 25), 200, 20),
+        (2024, 3, date(2024, 3, 31), date(2024, 4, 25), 300, 30),  # original Q3
+        (2024, 4, date(2024, 6, 30), date(2024, 7, 25), 400, 40),
+        (2025, 1, date(2024, 9, 30), date(2024, 10, 25), 500, 50),
+        (2025, 2, date(2024, 12, 31), date(2025, 1, 25), 600, 60),
+        (2025, 3, date(2025, 3, 31), date(2025, 4, 25), 700, 70),
+        (2025, 4, date(2025, 6, 30), date(2025, 7, 25), 800, 80),
+    ]
+    rows = [
+        _fund_row(
+            "MSFT_X",
+            789019,
+            fiscal_year=fy,
+            fiscal_quarter=fq,
+            filing_date=fd,
+            period_end_date=pe,
+            period_kind="quarterly",
+            revenues=float(rev),
+            net_income=float(ni),
+        )
+        for (fy, fq, pe, fd, rev, ni) in quarters
+    ]
+    # Restated FY24-Q3: same fiscal period, later filing_date, revenue 300 -> 350.
+    rows.append(
+        _fund_row(
+            "MSFT_X",
+            789019,
+            fiscal_year=2024,
+            fiscal_quarter=3,
+            filing_date=date(2024, 5, 25),
+            period_end_date=date(2024, 3, 31),
+            period_kind="quarterly",
+            revenues=350.0,
+            net_income=35.0,
+        )
+    )
+    return rows
+
+
+def _mar_fy_x_rows() -> list[dict[str, Any]]:
+    """8 quarterlies, March FY-end. Latest 4 at as_of=2024-12-01 cross fiscal years."""
+    quarters = [
+        (2024, 1, date(2023, 6, 30), date(2023, 8, 15), 100, 10),
+        (2024, 2, date(2023, 9, 30), date(2023, 11, 15), 200, 20),
+        (2024, 3, date(2023, 12, 31), date(2024, 2, 15), 300, 30),
+        (2024, 4, date(2024, 3, 31), date(2024, 5, 15), 400, 40),
+        (2025, 1, date(2024, 6, 30), date(2024, 8, 15), 500, 50),
+        (2025, 2, date(2024, 9, 30), date(2024, 11, 15), 600, 60),
+        (2025, 3, date(2024, 12, 31), date(2025, 2, 15), 700, 70),
+        (2025, 4, date(2025, 3, 31), date(2025, 5, 15), 800, 80),
+    ]
+    return [
+        _fund_row(
+            "MAR_FY_X",
+            12345,
+            fiscal_year=fy,
+            fiscal_quarter=fq,
+            filing_date=fd,
+            period_end_date=pe,
+            period_kind="quarterly",
+            revenues=float(rev),
+            net_income=float(ni),
+        )
+        for (fy, fq, pe, fd, rev, ni) in quarters
+    ]
+
+
+def _short_x_rows() -> list[dict[str, Any]]:
+    """Only 2 quarterlies — ttm_at must return None."""
+    quarters = [
+        (2024, 1, date(2024, 6, 30), date(2024, 8, 15), 100, 10),
+        (2024, 2, date(2024, 9, 30), date(2024, 11, 15), 200, 20),
+    ]
+    return [
+        _fund_row(
+            "SHORT_X",
+            55555,
+            fiscal_year=fy,
+            fiscal_quarter=fq,
+            filing_date=fd,
+            period_end_date=pe,
+            period_kind="quarterly",
+            revenues=float(rev),
+            net_income=float(ni),
+        )
+        for (fy, fq, pe, fd, rev, ni) in quarters
+    ]
+
+
+def _sparse_x_rows() -> list[dict[str, Any]]:
+    """4 quarterlies, but Q2 has revenues=None — ttm_with_status returns
+    (None, 'missing_field_value')."""
+    quarters = [
+        (2024, 1, date(2023, 12, 31), date(2024, 1, 31), 100, 10),
+        (2024, 2, date(2024, 3, 31), date(2024, 4, 30), None, 20),  # missing revenues
+        (2024, 3, date(2024, 6, 30), date(2024, 7, 31), 300, 30),
+        (2024, 4, date(2024, 9, 30), date(2024, 10, 31), 400, 40),
+    ]
+    return [
+        _fund_row(
+            "SPARSE_X",
+            66666,
+            fiscal_year=fy,
+            fiscal_quarter=fq,
+            filing_date=fd,
+            period_end_date=pe,
+            period_kind="quarterly",
+            revenues=(float(rev) if rev is not None else None),
+            net_income=float(ni),
+        )
+        for (fy, fq, pe, fd, rev, ni) in quarters
+    ]
+
+
+@pytest.fixture(scope="session")
+def fundamentals_fixture() -> pd.DataFrame:
+    """Engineered fundamentals frame for Day 16 / Day 17 tests.
+
+    See the comment block above for the encoded cases. The frame is
+    session-scoped — tests must not mutate it.
+    """
+    rows = _aapl_x_rows() + _msft_x_rows() + _mar_fy_x_rows() + _short_x_rows() + _sparse_x_rows()
+    df = pd.DataFrame(rows, columns=list(_FUND_COLUMNS))
+    return df
 
 
 # --- Week 1 / Week 2 ledger pipeline scaffolding ----------------------------
