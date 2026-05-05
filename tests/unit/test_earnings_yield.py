@@ -150,6 +150,27 @@ def test_earnings_yield_zero_mcap_marks_invalid_reason(
     assert row["valid_flag"] == False  # noqa: E712
 
 
+def test_earnings_yield_missing_mcap_marks_invalid_reason(
+    fundamentals_fixture: pd.DataFrame,
+) -> None:
+    panel = pd.DataFrame(
+        [
+            {
+                "date": date(2024, 12, 1),
+                "ticker": "AAPL_X",
+                "mcap": pd.NA,
+                "adj_close": 100.0,
+                "shares_out": 10.0,
+                "eligible_flag": True,
+            }
+        ]
+    )
+    out = EarningsYield().compute(panel, context=_ctx(fundamentals_fixture))
+    row = out.iloc[0]
+    assert row["invalid_reason"] == "invalid_denominator"
+    assert row["valid_flag"] == False  # noqa: E712
+
+
 # --- 9. Ambiguous CIK collapses to missing_fundamentals --------------------
 def test_earnings_yield_ambiguous_cik_collapses_to_missing_fundamentals(
     value_panel_fixture: pd.DataFrame,
@@ -249,3 +270,28 @@ def test_earnings_yield_diagnostics_in_parquet_metadata(
     for key in ("latest_filing_lag_days", "oldest_ttm_component_lag_days"):
         for stat in ("median", "p90", "max", "n"):
             assert stat in round_trip[key]
+
+
+def test_earnings_yield_diagnostics_include_lags_for_denominator_invalid_rows(
+    fundamentals_fixture: pd.DataFrame,
+) -> None:
+    panel = pd.DataFrame(
+        [
+            {
+                "date": date(2024, 12, 1),
+                "ticker": "AAPL_X",
+                "mcap": 0.0,
+                "adj_close": 100.0,
+                "shares_out": 0.0,
+                "eligible_flag": True,
+            }
+        ]
+    )
+    factor = EarningsYield()
+    context = _ctx(fundamentals_fixture)
+    out = factor.compute(panel, context=context)
+    diag = factor.diagnostics(out, context=context)
+
+    assert diag["invalid_reason_counts"]["invalid_denominator"] == 1
+    assert diag["latest_filing_lag_days"]["n"] == 1
+    assert diag["oldest_ttm_component_lag_days"]["n"] == 1

@@ -56,6 +56,18 @@ _TTM_STATUS_TO_INVALID_REASON: dict[str, str] = {
 }
 
 
+def _positive_finite_float(value: Any) -> float | None:
+    if pd.isna(value):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed <= 0:
+        return None
+    return parsed
+
+
 class EarningsYield(Factor):
     """Trailing-twelve-months net income over current market cap (E/P)."""
 
@@ -163,12 +175,12 @@ class EarningsYield(Factor):
             mapped = _TTM_STATUS_TO_INVALID_REASON.get(status, "missing_fundamentals")
             return mapped, float("nan")
 
-        mcap = row.mcap
-        if mcap is None or (isinstance(mcap, float) and math.isnan(mcap)) or mcap <= 0:
+        mcap_value = _positive_finite_float(row.mcap)
+        if mcap_value is None:
             return "invalid_denominator", float("nan")
 
         assert ttm_ni is not None  # status was None ⟹ ttm_ni is non-None
-        raw = ttm_ni / mcap
+        raw = ttm_ni / mcap_value
         if not math.isfinite(raw):
             return "raw_factor_nan", float("nan")
         return None, raw
@@ -188,15 +200,20 @@ class EarningsYield(Factor):
             return diag
 
         fundamentals = context.fundamentals
-        valid = factor_out[factor_out["valid_flag"]]
-        if valid.empty:
+        if factor_out.empty:
             return diag
+        funds_by_ticker: dict[str, pd.DataFrame] = {
+            str(t): g for t, g in fundamentals.groupby("ticker", sort=False)
+        }
 
         latest_lags: list[int] = []
         ttm_lags: list[int] = []
-        for d, t in zip(valid["date"], valid["ticker"], strict=False):
-            ll = latest_filing_lag_days(t, d, fundamentals)
-            tl = oldest_ttm_component_lag_days(t, d, fundamentals)
+        for d, t in zip(factor_out["date"], factor_out["ticker"], strict=False):
+            funds_sub = funds_by_ticker.get(str(t))
+            if funds_sub is None:
+                continue
+            ll = latest_filing_lag_days(t, d, funds_sub)
+            tl = oldest_ttm_component_lag_days(t, d, funds_sub)
             if ll is not None:
                 latest_lags.append(ll)
             if tl is not None:

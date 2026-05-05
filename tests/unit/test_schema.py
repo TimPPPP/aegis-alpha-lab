@@ -309,6 +309,18 @@ def test_factor_observation_rejects_invalid_flag_with_null_invalid_reason() -> N
         )
 
 
+def test_factor_observation_rejects_unknown_invalid_reason() -> None:
+    with pytest.raises(ValidationError):
+        _good_obs(
+            raw_value=None,
+            winsorized_value=None,
+            zscore_value=None,
+            valid_flag=False,
+            tradable_flag=False,
+            invalid_reason="not_a_factor_reason",
+        )
+
+
 # --- Factor ABC --------------------------------------------------------------
 def test_factor_abc_cannot_be_instantiated() -> None:
     with pytest.raises(TypeError):

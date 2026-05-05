@@ -27,7 +27,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import pandas as pd
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -37,6 +37,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class _FrozenRow(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+
+InvalidReason = Literal[
+    "history_ineligible",
+    "missing_fundamentals",
+    "insufficient_quarters",
+    "invalid_denominator",
+    "raw_factor_nan",
+]
 
 
 class FactorObservation(_FrozenRow):
@@ -71,7 +80,7 @@ class FactorObservation(_FrozenRow):
     tradable_flag: bool | None = None
     feature_snapshot_id: str = Field(min_length=1)
 
-    invalid_reason: str | None = None  # Day 17: 10th column
+    invalid_reason: InvalidReason | None = None  # Day 17: 10th column
 
     @model_validator(mode="after")
     def _valid_flag_matches_values(self) -> FactorObservation:
@@ -210,6 +219,7 @@ __all__ = [
     "Factor",
     "FactorContext",
     "FactorObservation",
+    "InvalidReason",
     "read_factor_diagnostics",
     "write_factor_parquet",
 ]
